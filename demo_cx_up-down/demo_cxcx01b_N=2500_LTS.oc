@@ -1,0 +1,641 @@
+// Network of IF cells - Sustained Activity
+//
+// 2-layer cortico-cortical network consisting of
+// - a N=2000 Vogels-Abbott cortical network, 80-20% EX and IN cells
+// - a N=500 Vogels-Abbott cortical network, 80-20% EX and IN cells
+//   Only in this 2nd network, a proportion of exc cells (10%) are LTS
+// - interlayer connectivity: 0.7% probability
+//
+// calculate the nb of spikes for each cell -> "numspikes_cxcx01_LTS2500b.dat"
+// calculate spiketimes -> "spiketimes_cxcx01_LTS2500b.dat"
+// write the Vm of one cell to "Vm700_cxcx01_LTS2500b.dat" for control
+// print the values of the connectivity
+//
+// All cells described by IF-BG4 mechanism, with
+// 3 cell types: RS and FS for cortex layer 1, and RS,FS,LTS for
+// the second layer
+//
+// This file: weak adaptation for RS cells (0.02), 
+//            10% of LTS cells in layer 2,
+//            interlayer connection probability of 0.007
+//    => NICE UP/DOWN STATES
+//
+
+load_file("nrngui.hoc")
+
+//-----------------------------------------------------------------
+//  Parameters
+//-----------------------------------------------------------------
+
+// General parameters
+
+DT = 0.1 		                        // (ms) Time step
+TSTART 	= 0                                     
+TSTOP	= 5000
+V_INIT  = -60
+celsius = 36
+
+
+// Cell parameters
+
+LENGTH		= sqrt(20000/PI)		// in um
+DIAMETER 	= sqrt(20000/PI)		// in um
+AREA		= 1e-8 * PI * LENGTH * DIAMETER	// membrane area in cm2
+TAU  		= 20				// time constant in ms
+CAPACITANCE	= 1 				// capacitance in muF/cm2
+G_L  		= 1e-3 * CAPACITANCE / TAU	// leak conductance in S/cm2
+V_REST		= -60				// resting potential	
+
+
+// Spike parameters
+
+VTR  		= -50 		// threshold in mV
+VTOP 		= 40		// top voltage during spike in mV
+VBOT 		= -60		// reset voltage in mV
+REFRACTORY	= 5		// refractory period in ms
+
+// Synapse parameters
+
+TAU_E		= 5		// excitation time constant in ms
+TAU_I		= 10		// inhibition time constant in ms
+V_E 		= 0		// excitatory reversal potential
+V_I 		= -80		// inhibitory reversal potential
+AMPA_GMAX	= 0.006
+GABA_GMAX	= 0.067
+
+
+
+
+
+// Network parameters
+// Cortex layer 1
+N_CX = 2000		// Number of cortical cells
+N_I = int(N_CX/5.0)	// Number of Cx inibitory cells
+N_E = N_CX - N_I	// Number of excitatory cells
+PROB_CONNECT = 0.02	// Connection probability in cortex
+C_I = int(N_I*PROB_CONNECT)	// nb inh synapses per neuron
+C_E = int(N_E*PROB_CONNECT)	// nb exc synapses per neuron
+
+// Cortex layer 2
+N_LAY2 = 500		// Number of layer 2 cortical cells
+N_I2 = int(N_LAY2/5.0)	// Number of IN cells in layer 2
+N_E2 = N_LAY2 - N_I2	// Number of EXC cells in layer 2
+PROB_CONNECT2 = 0.02*2000/N_LAY2	// prob renormalized to size
+C_I2 = int(N_I2*PROB_CONNECT2)	// nb inh synapses per neuron in lay2
+C_E2 = int(N_E2*PROB_CONNECT2)	// nb exc synapses per neuron in lay2
+
+N_GEN = N_CX + N_LAY2	// total number of cells
+
+PROP = 0.1		// proportion of cortical LTS cells
+
+PROB_CONNECT3 = 0.007	// Connection probability from lay1 to lay2
+C_12 = int(N_CX*PROB_CONNECT3)   // nb exc synapses from lay1 to lay2
+
+PROB_CONNECT4 = 0.007	// Connection probability from lay2 to lay1
+C_21 = int(N_LAY2*PROB_CONNECT4) // nb exc synapses from lay2 to lay1
+
+
+
+// Stimulation parameters
+
+N_STIM		= N_GEN		// number of neurons stimulated
+STOPSTIM        = 50		// duration of stimulation (ms)
+NSYN_STIM	= 20		// nb of stim (exc) synapses per neuron
+STIM_INTERVAL	= 70		// mean interval between stims (ms)
+
+
+
+
+//-----------------------------------------------------------------
+//  Create cells
+//-----------------------------------------------------------------
+
+begintemplate CXcell
+  public soma, nclist, ampa, gaba, stimsyn
+  public x, y, z
+
+  create soma
+
+  objectvar nclist, ampa, gaba, stimsyn
+  
+  proc init() {
+    create soma
+    access soma  
+    soma {
+	insert pas
+	insert IF_BG4
+    }
+    nclist = new List()
+  }
+
+endtemplate CXcell
+
+
+
+//-----------------------------------------------------------------
+//  Create Network
+//-----------------------------------------------------------------
+
+objectvar neuron[N_GEN],  rLTS
+rLTS = new Random()
+
+nLTS = 0
+
+proc netCreate () { local nbactual, i
+
+ for nbactual=0, N_CX-1 {	// create cortical cells
+	neuron[nbactual] = new CXcell()
+        neuron[nbactual].soma {
+		L = LENGTH
+		diam = DIAMETER
+		e_pas = V_REST
+		g_pas = G_L
+		Vtr_IF_BG4 = VTR
+		Ref_IF_BG4 = REFRACTORY
+		Vtop_IF_BG4 = VTOP
+		Vbot_IF_BG4 = VBOT
+
+		// Alain parameters (RS cell)
+		a_IF_BG4 	= .001
+		b_IF_BG4	= 0.005	// very weak adaptation (was 0.1)
+		b_IF_BG4	= 0.02	// weak adaptation
+		if(nbactual >= N_E) {
+		   b_IF_BG4 = 0		// no adaptation for FS cells
+		}
+
+		tau_w_IF_BG4	= 600
+		EL_IF_BG4	= e_pas
+		GL_IF_BG4	= g_pas
+		delta_IF_BG4	= 2.5
+		surf_IF_BG4 	= area(0.5)
+	}	
+	setExpAMPA(nbactual)
+	setExpGABA(nbactual)
+	setExpStim(nbactual)
+ }
+
+
+
+  for nbactual=N_CX, N_CX+N_E2-1 {	// layer 2 EX cells
+	neuron[nbactual] = new CXcell()
+        neuron[nbactual].soma {
+		L = LENGTH
+		diam = DIAMETER
+		e_pas = V_REST
+		g_pas = G_L
+		Vtr_IF_BG4 = VTR
+		Ref_IF_BG4 = REFRACTORY
+		Vtop_IF_BG4 = VTOP
+		Vbot_IF_BG4 = VBOT
+
+		// Alain parameters (RS cell)
+		a_IF_BG4 	= .001
+		b_IF_BG4	= 0.1		// full adaptation
+		b_IF_BG4	= 0.005		// weaker adaptation
+
+		// check if LTS cell
+		if(rLTS.uniform(0,1) < PROP) {
+		   print "Cell ",nbactual," is LTS"
+		   a_IF_BG4 	= .02		// LTS cell
+		   b_IF_BG4 	= 0		// LTS cell
+		   nLTS = nLTS + 1
+                }
+
+		tau_w_IF_BG4	= 600
+		EL_IF_BG4	= e_pas
+		GL_IF_BG4	= g_pas
+		delta_IF_BG4	= 2.5
+		surf_IF_BG4 	= area(0.5)
+	}	
+	setExpAMPA(nbactual)
+	setExpGABA(nbactual)
+	setExpStim(nbactual)
+ }
+
+  for nbactual=N_CX+N_E2, N_GEN-1 {	//  Layer 2 inh cells
+	neuron[nbactual] = new CXcell()
+        neuron[nbactual].soma {
+		L = LENGTH
+		diam = DIAMETER
+		e_pas = V_REST
+		g_pas = G_L
+		Vtr_IF_BG4 = VTR
+		Ref_IF_BG4 = REFRACTORY
+		Vtop_IF_BG4 = VTOP
+		Vbot_IF_BG4 = VBOT
+
+		// Alain parameters (RF cell)
+		a_IF_BG4 	= .001
+		b_IF_BG4 = 0		// no adaptation for FS cells
+
+		tau_w_IF_BG4	= 600
+		EL_IF_BG4	= e_pas
+		GL_IF_BG4	= g_pas
+		delta_IF_BG4	= 2.5
+		surf_IF_BG4 	= area(0.5)
+	}	
+	setExpAMPA(nbactual)
+	setExpGABA(nbactual)
+	setExpStim(nbactual)
+ }
+ print nbactual," neurons created"
+
+}
+
+
+proc setExpAMPA() {
+	neuron[$1].ampa = new multiAMPAexp(0.5)
+	neuron[$1].ampa.allocate(C_E)		// allocate space for synapse
+	neuron[$1].ampa.q = 1
+	neuron[$1].ampa.gmax = AMPA_GMAX	// max conductance
+	neuron[$1].ampa.id = $1			// id of cell
+	Erev_multiAMPAexp = V_E		// excitatory reversal (mV)
+	Prethresh_multiAMPAexp = VTR	// voltage treshold for release (mV)
+	Deadtime_multiAMPAexp = 2 * DT	// synapse "refractory"
+	Beta_multiAMPAexp = 1 / TAU_E	// inhibition time constant
+}
+
+
+proc setExpGABA() {
+	neuron[$1].gaba = new multiGABAAexp(0.5)
+	neuron[$1].gaba.allocate(C_I)		// allocate space for synapse
+	neuron[$1].gaba.q = 1
+	neuron[$1].gaba.gmax = GABA_GMAX	// max conductance
+	neuron[$1].gaba.id = -$1		// id of cell
+	Erev_multiGABAAexp = V_I	// inhibitory reversal (mV)
+	Prethresh_multiGABAAexp = VTR	// voltage treshold for release (mV)
+	Deadtime_multiGABAAexp = 2 * DT	// synapse "refractory"
+	Beta_multiGABAAexp = 1 / TAU_I	// inhibition time constant
+}
+
+
+proc setExpStim() {
+	neuron[$1].stimsyn = new multiStimexp(0.5)
+	neuron[$1].stimsyn.allocate(NSYN_STIM)
+	neuron[$1].stimsyn.q = 1
+	neuron[$1].stimsyn.gmax = AMPA_GMAX
+	neuron[$1].stimsyn.id = 15000 + $1
+	Erev_multiStimexp = V_E		// excitatory reversal potential
+	Prethresh_multiStimexp = VTR	// voltage treshold for release (mV)
+	Deadtime_multiStimexp = 0	// no synapse response to input
+	Beta_multiStimexp = 1 / TAU_E
+}
+
+
+
+//  Connect cells
+
+
+objref rCon, netcon
+rCon = new Random()
+
+PRINT = 2        // flag to print; 0=minimal, 1=verbose, 2=summary
+
+ne = 0
+ni = 0
+ntc = 0
+ntr = 0
+nrt = 0
+ncx = 0
+ie = 0
+ii = 0
+itc = 0
+itr = 0
+irt = 0
+icx = 0
+
+proc netConnect() { // local i, j, rand, distvert, nbconn
+
+   print "Calculate connectivity of cortical cells..."
+   // scan cortical cells
+   for(i = 0; i < N_CX; i = i + 1) {
+	if(PRINT==1) {
+	   if(i<N_E) {
+		print "Cortical EX cell ",i
+	   } else {
+		print "Cortical IN cell ",i
+	   }
+	}
+	nbconex = 0
+	nbconin = 0
+	access neuron[i].soma
+
+	// Insert excitatory inputs from exc cells
+
+	j = 0
+	while((nbconex < C_E) && (j < N_E)){
+	    	rand = rCon.uniform(0.0, 1.0)
+		if((i != j) && (rand <= PROB_CONNECT)){
+		    	neuron[i].ampa.addlink(&neuron[j].soma.v(0.5))
+			nbconex = nbconex + 1
+		}
+	 	j = j + 1
+	}
+	if(PRINT==1) print " - exc inputs from CX:",nbconex
+        ne = ne + nbconex
+	ie = ie + 1
+
+	// Insert inhibitory inputs from inh cells
+
+	j =  N_E
+    	while((nbconin < C_I) && (j < N_CX)) {
+	    	rand = rCon.uniform(0.0, 1.0)
+		if((i!=j) && (rand <= PROB_CONNECT)){
+		    	neuron[i].gaba.addlink(&neuron[j].soma.v(0.5))
+			nbconin = nbconin + 1
+		}
+		j = j + 1
+	}
+	if(PRINT==1) print " - inh inputs from CX:",nbconin
+        ni= ni + nbconin
+	ii = ii + 1
+
+	// Insert exc inputs from layer 2 exc cells
+
+	j =  N_CX
+	oldex = nbconex
+    	while((nbconex-oldex < C_21) && (j < N_CX+N_E2)) {
+	    	rand = rCon.uniform(0.0, 1.0)
+		if((i!=j) && (rand <= PROB_CONNECT4)){
+		    	neuron[i].ampa.addlink(&neuron[j].soma.v(0.5))
+			nbconex = nbconex + 1
+		}
+		j = j + 1
+	}
+	if(PRINT==1) print " - exc inputs from Layer 2:",nbconex-oldex
+	ntc = ntc + (nbconex-oldex)
+	itc = itc + 1 
+  }
+
+
+
+   print "Calculate connectivity of Layer 2 cells..."
+   // scan layer 2 cells
+   for(i = N_CX; i < N_GEN; i = i + 1) {
+	if(PRINT==1) {
+	   if(i<N_CX+N_E2) {
+		print "Layer 2 exc cell ",i
+	   } else {
+		print "Layer 2 inh cell ",i
+	   }
+	}
+	nbconex = 0
+	nbconin = 0
+	access neuron[i].soma
+
+	// Insert excitatory inputs from cortex (same for all layer 2 cells)
+
+	j = 0
+	while((nbconex < C_12) && (j < N_E)){
+	    	rand = rCon.uniform(0.0, 1.0)
+		if((i != j) && (rand <= PROB_CONNECT3)){
+		    	neuron[i].ampa.addlink(&neuron[j].soma.v(0.5))
+			nbconex = nbconex + 1
+		}
+	 	j = j + 1
+	}
+	if(PRINT==1) print " - exc inputs from CX:",nbconex
+	ncx = ncx + nbconex
+	icx = icx + 1
+
+	// Insert inhibitory inputs from layer 2 inh cells (same for all layer 2 cells)
+
+	j =  N_CX+N_E2
+    	while((nbconin < C_I2) && (j < N_GEN)) {
+	    	rand = rCon.uniform(0.0, 1.0)
+		if((i!=j) && (rand <= PROB_CONNECT2)){
+		    	neuron[i].gaba.addlink(&neuron[j].soma.v(0.5))
+			nbconin = nbconin + 1
+		}
+		j = j + 1
+	}
+	if(PRINT==1) print " - inh inputs from inh layer 2:",nbconin
+	nrt = nrt + nbconin
+	irt = irt + 1
+
+	// Insert exc inputs from layer 2 exc cells (all layer 2 cells)
+
+        oldex = nbconex
+	j =  N_CX
+    	while((nbconex < C_E2) && (j < N_CX+N_E2)) {
+	    	rand = rCon.uniform(0.0, 1.0)
+		if((i!=j) && (rand <= PROB_CONNECT2)){
+		    	neuron[i].ampa.addlink(&neuron[j].soma.v(0.5))
+			nbconex = nbconex + 1
+		}
+		j = j + 1
+	}
+	if(PRINT==1) print " - exc inputs from exc layer 2:",nbconex-oldex
+	ntr = ntr + nbconex-oldex
+	itr = itr + 1
+   }
+
+   if(PRINT==2) {
+        print "MEAN SYNAPSES PER NEURON:"
+	print "cortical excitatory inputs =",ne/ie
+	print "cortical inhibitory inputs =",ni/ii
+	print "layer2 -> cortical inputs  =",ntc/itc
+	print "cortical -> layer2 inputs  =",ncx/icx
+	print "layer 2 excitatory inputs  =",ntr/itr
+	print "layer 2 inhibitory inputs  =",nrt/irt
+   }
+
+}
+
+
+
+
+
+//-----------------------------------------------------------------
+//  External Input
+//-----------------------------------------------------------------
+
+nstim = NSYN_STIM
+objref stim[nstim*N_STIM], stimcon
+
+
+proc insertStimulation() {local i, j, n, w
+    print "Add stimulation of cortical neurons..."
+    for(i = 0; i < N_STIM; i = i + 1) {
+     	access neuron[i].soma
+	for (j = 0; j < nstim; j = j + 1) {
+	    n = nstim * i + j
+    	    stim[n] = new gen(0.5)
+    	    stim[n].latency = TSTART
+    	    stim[n].shutoff = STOPSTIM
+	    stim[n].invl = STIM_INTERVAL
+    	    stim[n].noise = 1		// noisy stimulus	
+    	    stim[n].min_val = VBOT
+    	    stim[n].max_val = VTOP
+	    neuron[i].stimsyn.addlink(&stim[n].x)
+   	    neuron[i].nclist.prepend(stim)
+	}
+    }
+}
+
+
+
+
+//-----------------------------------------------------------------
+// Simulation settings
+//-----------------------------------------------------------------
+
+dt = DT
+steps_per_ms = 1/DT
+tstart = TSTART
+tstop = TSTOP
+v_init = V_INIT
+
+
+
+//-----------------------------------------------------------------
+//  Add graphs
+//-----------------------------------------------------------------
+
+objectvar g[20]
+ngraph = 0
+
+proc addgraph() { local ii
+  ngraph = ngraph+1
+  ii = ngraph-1
+  g[ii] = new Graph()
+  g[ii].size(tstart,tstop,$1,$2)
+  g[ii].xaxis()
+  g[ii].yaxis()
+  g[ii].addexpr($s3,$4,0)
+  g[ii].save_name("graphList[0].")
+  graphList[0].append(g[ii])
+}
+
+
+
+print ""
+print "======================================================================="
+print "            Network of ",N_GEN,"IF neurons in an active state"
+print "======================================================================="
+print ""
+
+
+
+//------------------------------------------------------------------------------
+//  creating cells
+//------------------------------------------------------------------------------
+print "----[ CREATING CELLS ]----"
+netCreate()
+
+//------------------------------------------------------------------------------
+//  creating network
+//------------------------------------------------------------------------------
+print "----[ CREATING NETWORK ]----"
+netConnect()
+
+//------------------------------------------------------------------------------
+//  adding network input
+//------------------------------------------------------------------------------
+print "----[ ADDING NETWORK INPUT ]----"
+insertStimulation()
+
+
+
+//------------------------------------------------------------------------------
+//  procedures to write spike times
+//------------------------------------------------------------------------------
+
+double nspikes[N_GEN]
+
+proc write_spikes() {
+  wopen("spiketimes_cxcx01_LTS2500b.dat")
+  for i=0, N_GEN - 1 {
+	access neuron[i].soma
+	nspikes[i] = nspike_IF_BG4
+	for j=0, nspikes[i]-1 {
+	     fprint("%g %g\n",i,spiketimes_IF_BG4[j])
+        }
+  }
+  wopen("")
+}
+
+
+
+//-----------------------------------------------------------------
+//  Graphs
+//-----------------------------------------------------------------
+
+nrnmainmenu()
+nrncontrolmenu()
+  
+// access origin of network
+access neuron[0].soma
+
+// adding graphs
+addgraph(-80, 40, "neuron[0].soma.v(0.5)", 4)	// excitatory CX
+addgraph(-80, 40, "neuron[1].soma.v(0.5)", 4)
+addgraph(-80, 40, "neuron[2].soma.v(0.5)", 4)
+addgraph(-80, 40, "neuron[3].soma.v(0.5)", 4)
+
+addgraph(-80, 40, "neuron[1900].soma.v(0.5)", 4)  // inhibitory CX
+addgraph(-80, 40, "neuron[1901].soma.v(0.5)", 4)
+
+addgraph(-80, 40, "neuron[2010].soma.v(0.5)", 4)  // Layer 2 exc
+addgraph(-80, 40, "neuron[2011].soma.v(0.5)", 4)
+
+addgraph(-80, 40, "neuron[2410].soma.v(0.5)", 4)  // Layer 2 inh
+addgraph(-80, 40, "neuron[2411].soma.v(0.5)", 4)
+
+npt = tstop/dt
+objref Vm
+Vm = new Vector(npt)
+Vm.record(&neuron[700].soma.v(0.5),dt)		// record the Vm
+
+
+
+//-----------------------------------------------------------------
+// Procedure to run simulation and menu
+//-----------------------------------------------------------------
+
+proc run_sim() {
+  init()
+  run()
+
+  print "Writing spikes on file..."
+  write_spikes()
+
+  wopen("numspikes_cxcx01_LTS2500b.dat")
+  fprint("%g %g\n",N_GEN,t)		// write nb of cells and time
+  sum1 = 0
+  sum2 = 0
+  for i=0, N_GEN-1 {
+	fprint("%g\n",nspikes[i])	// write tot number of spikes
+	rate = nspikes[i] * 1000 / TSTOP
+        sum1 = sum1 + rate
+	sum2 = sum2 + rate^2
+  }
+  wopen("")
+
+  sum1 = sum1 / N_GEN
+  sum2 = sqrt( sum2/N_GEN - sum1^2 )
+  print "Mean rate per cell (Hz) = ",sum1
+  print "standard deviation = ",sum2
+
+  wopen("Vm700_cxcx01_LTS2500b.dat")
+  tt=0
+  fprint("%g %g\n",npt,dt)
+  for i=0,npt-1 {
+    fprint("%g %g\n",tt,Vm.get(i))
+    tt = tt + dt
+  }
+  wopen("")			// close file
+}
+
+
+
+
+proc make_Vpanel() {			// make panel
+	xpanel("Brette-Gerstner network")
+	xbutton("Run simulation","run_sim()")
+	xpanel()
+}
+
+make_Vpanel()
+
+

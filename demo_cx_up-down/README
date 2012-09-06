@@ -1,0 +1,28 @@
+NEURON simulations of Up/Down states in networks of excitatory and
+inhibitory neurons, described by Adaptative Exponential
+(Brette-Gerstner-Izhikevich) type neurons with exponential approach
+to threshold.  The model consisted of a two-layer cortical network,
+with the first layer containing 2000 neurons, randomly connected. 
+The second later contains 500 neurons, also randomly connected, but
+with a proportion of 10% LTS cells.  The two interconnected networks
+generate Up/Down states, and is the first model of self-sustained
+Up/Down states without the addition of external noise.  See details
+in
+
+Destexhe, A. Self-sustained asynchronous irregular states and
+Up/Down states in thalamic, cortical and thalamocortical networks
+of nonlinear integrate-and-fire neurons.  Journal of Computational
+Neuroscience (submitted).  
+
+arXiv preprint: http://arxiv.org/abs/0809.0654
+
+Implementation: the mechanism IF_BG4.mod implements the Adaptative
+Exponential IF model together with an IF model where the spike is
+simulated by a "fake conductance" mechanism.  (see details in the
+mod file)
+
+Note that this implementation is slow and not optimized.
+
+Alain Destexhe
+destexhe@unic.cnrs-gif.fr
+http://cns.iaf.cnrs-gif.fr

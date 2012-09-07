@@ -106,6 +106,9 @@ FUNCTION fpoisrand(mean, noise) {
         }
 }
 
+PROCEDURE seed(i) {
+        set_seed(i)
+}
 
 
 

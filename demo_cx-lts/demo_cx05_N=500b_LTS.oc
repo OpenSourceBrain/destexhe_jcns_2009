@@ -27,6 +27,10 @@ load_file("nrngui.hoc")
 
 // General parameters
 
+SEED_LTS = 428577
+SEED_CONN = 193566
+SEED_GEN = 983649
+
 DT = 0.1 		                        // (ms) Time step
 TSTART 	= 0                                     
 TSTOP	= 5000
@@ -145,7 +149,7 @@ endtemplate THcell
 //-----------------------------------------------------------------
 
 objectvar neuron[N_GEN], rLTS
-rLTS = new Random()
+rLTS = new Random(SEED_LTS)
 
 nLTS = 0
 
@@ -261,7 +265,7 @@ proc setExpStim() {
 
 
 objref rCon, netcon
-rCon = new Random()
+rCon = new Random(SEED_CONN)
 
 PRINT = 2        // flag to print; 0=minimal, 1=verbose, 2=summary
 
@@ -355,6 +359,7 @@ proc insertStimulation() {local i, j, n, w
    	    neuron[i].nclist.prepend(stim)
 	}
     }
+    neuron[0].nclist.o[0].seed(SEED_GEN)
 }
 
 

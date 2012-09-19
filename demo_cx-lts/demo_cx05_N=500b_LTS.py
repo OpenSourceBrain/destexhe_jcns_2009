@@ -5,9 +5,9 @@
  80-20% proportion, and random connectivity
  The excitatory cells also include a proportion of LTS cells
 
- calculate the nb of spikes for each cell -> "numspikes_cx05_LTS500b.dat"
- calculate spiketimes -> "spiketimes_cx05_LTS500b.dat"
- write the Vm of one cell to "Vm170_cx05_LTS500b.dat" for control
+ calculate the nb of spikes for each cell -> "numspikes_cx05_LTS500b_B.dat"
+ calculate spiketimes -> "spiketimes_cx05_LTS500b_B.dat"
+ write the Vm of one cell to "Vm170_cx05_LTS500b_B.dat" for control
  print the values of the connectivity
 
  cortical excitatory inputs 61.03425  -> from 1.9 % of exc cells
@@ -19,11 +19,15 @@
  Proportion of LTS cells: 5%
   => sustained activity (AI state)
   
- Direct conversion of Alain's Hoc file to Python with minimal changes.
+ Direct conversion of Alain's Hoc file to Python with minimal changes, but
+ using AdExpIF mechanism instead of IF_BG4.
 """
 
-from neuron import h, nrn, gui
+from neuron import h, nrn, gui, load_mechanisms
 from math import sqrt, pi
+from pyNN import __path__ as pyNN_path
+
+load_mechanisms(pyNN_path[0]+"/neuron/nmodl")
 
 h.load_file("nrngui.hoc")
     
@@ -58,7 +62,7 @@ V_REST          = -60                           # resting potential
 VTR             = -50           # threshold in mV
 VTOP            = 40            # top voltage during spike in mV
 VBOT            = -60           # reset voltage in mV
-REFRACTORY      = 5             # refractory period in ms
+REFRACTORY      = 5.0/2         # refractory period in ms (correction for a bug in IF_BG4)
 
 # Synapse parameters
 
@@ -102,8 +106,12 @@ class CXcell(object):
   def __init__(self):
     self.soma = nrn.Section()
     self.soma.insert('pas')
-    self.soma.insert('IF_BG4')
+    self.adexp = h.AdExpIF(0.5, sec=self.soma)
     self.nclist = []
+    self.spike_times = h.Vector()
+    self.rec = h.NetCon(self.soma(0.5)._ref_v, None, VTR,
+                        0.0, 0.0, sec=self.soma)
+    self.rec.record(self.spike_times)
 
 
 class THcell(object):
@@ -111,7 +119,7 @@ class THcell(object):
   def __init__(self):
     self.soma = nrn.Section()
     self.soma.insert('pas')
-    self.soma.insert('IF_BG4')
+    self.adexp = h.AdExpIF(0.5, sec=self.soma)
     self.nclist = []
 
 #-----------------------------------------------------------------
@@ -131,32 +139,34 @@ def netCreate ():
         neuron.append(CXcell())
         assert len(neuron) == nbactual+1
         soma = neuron[nbactual].soma
+        adexp = neuron[nbactual].adexp
         soma.L = LENGTH
         soma.diam = DIAMETER
         soma.e_pas = V_REST
         soma.g_pas = G_L
-        soma.Vtr_IF_BG4 = VTR
-        soma.Ref_IF_BG4 = REFRACTORY
-        soma.Vtop_IF_BG4 = VTOP
-        soma.Vbot_IF_BG4 = VBOT
+        adexp.vthresh = VTR # spike threshold for exponential calculation purposes
+        adexp.trefrac = REFRACTORY + DT # add the DT for compatibility with IF_BG4
+        adexp.vpeak = VTOP
+        adexp.vreset = VBOT
+        adexp.vspike = VTR # spike-detection threshold
+        adexp.spikewidth = DT # for display purposes
 
         # Alain parameters (RS cell)
-        soma.a_IF_BG4        = .001
-        soma.b_IF_BG4        = 0.1           # full adaptation
-        soma.b_IF_BG4        = 0.005         # weaker adaptation
+        adexp.a        = .001
+        adexp.b        = 0.1           # full adaptation
+        adexp.b        = 0.005         # weaker adaptation
 
         # check if LTS cell
         if rLTS.uniform(0,1) < PROP:
             print "Cell ",nbactual," is LTS"
-            soma.a_IF_BG4     = .02           # LTS cell
-            soma.b_IF_BG4     = 0             # LTS cell
+            adexp.a     = .02           # LTS cell
+            adexp.b     = 0             # LTS cell
             nLTS = nLTS + 1
 
-        soma.tau_w_IF_BG4    = 600
-        soma.EL_IF_BG4       = soma.e_pas
-        soma.GL_IF_BG4       = soma.g_pas
-        soma.delta_IF_BG4    = 2.5
-        soma.surf_IF_BG4     = area(soma)
+        adexp.tauw    = 600
+        adexp.EL       = soma.e_pas
+        adexp.GL       = soma.g_pas*area(soma)*1e-2
+        adexp.delta    = 2.5
            
         setExpAMPA(nbactual)
         setExpGABA(nbactual)
@@ -166,24 +176,26 @@ def netCreate ():
         neuron.append(CXcell())
         assert len(neuron) == nbactual+1
         soma = neuron[nbactual].soma
+        adexp = neuron[nbactual].adexp
         soma.L = LENGTH
         soma.diam = DIAMETER
         soma.e_pas = V_REST
         soma.g_pas = G_L
-        soma.Vtr_IF_BG4 = VTR
-        soma.Ref_IF_BG4 = REFRACTORY
-        soma.Vtop_IF_BG4 = VTOP
-        soma.Vbot_IF_BG4 = VBOT
+        adexp.vthresh = VTR
+        adexp.trefrac = REFRACTORY + DT
+        adexp.vpeak = VTOP
+        adexp.vreset = VBOT
+        adexp.vspike = VTR # spike-detection threshold
+        adexp.spikewidth = DT # for display purposes
 
         # Alain parameters (FS cell)
-        soma.a_IF_BG4        = .001
-        soma.b_IF_BG4        = 0             # no adaptation
-        soma.tau_w_IF_BG4    = 600
-        soma.EL_IF_BG4       = soma.e_pas
-        soma.GL_IF_BG4       = soma.g_pas
-        soma.delta_IF_BG4    = 2.5
-        soma.surf_IF_BG4     = area(soma)
-           
+        adexp.a        = .001
+        adexp.b        = 0             # no adaptation
+        adexp.tauw    = 600
+        adexp.EL       = soma.e_pas
+        adexp.GL       = soma.g_pas*area(soma)*1e-2
+        adexp.delta    = 2.5
+
         setExpAMPA(nbactual)
         setExpGABA(nbactual)
         setExpStim(nbactual)
@@ -364,9 +376,9 @@ nspikes = []
 def write_spikes():
   f = open("spiketimes_cx05_LTS500b.dat", 'w')
   for i in range(0, N_GEN):
-    nspikes.append(neuron[i].soma.nspike_IF_BG4)
+    nspikes.append(neuron[i].spike_times.size())
     for j in range(0, int(nspikes[i])):
-        f.write("%g %g\n" % (i, neuron[i].soma.spiketimes_IF_BG4[j]))
+        f.write("%g %g\n" % (i, neuron[i].spike_times.x[j]))
   f.close()
 
 #-----------------------------------------------------------------

@@ -5,9 +5,9 @@
  80-20% proportion, and random connectivity
  The excitatory cells also include a proportion of LTS cells
 
- calculate the nb of spikes for each cell -> "numspikes_cx05_LTS500b_B.dat"
- calculate spiketimes -> "spiketimes_cx05_LTS500b_B.dat"
- write the Vm of one cell to "Vm170_cx05_LTS500b_B.dat" for control
+ calculate the nb of spikes for each cell -> "numspikes_cx05_LTS500b.dat"
+ calculate spiketimes -> "spiketimes_cx05_LTS500b.dat"
+ write the Vm of one cell to "Vm170_cx05_LTS500b.dat" for control
  print the values of the connectivity
 
  cortical excitatory inputs 61.03425  -> from 1.9 % of exc cells
@@ -19,8 +19,8 @@
  Proportion of LTS cells: 5%
   => sustained activity (AI state)
   
- Direct conversion of Alain's Hoc file to Python with minimal changes, but
- using AdExpIF mechanism instead of IF_BG4.
+ Refactoring of original Python conversion of Alain's Hoc file, putting more
+ of the code into the cell classes.
 """
 
 from neuron import h, nrn, gui, load_mechanisms
@@ -57,12 +57,24 @@ CAPACITANCE     = 1                             # capacitance in muF/cm2
 G_L             = 1e-3 * CAPACITANCE / TAU      # leak conductance in S/cm2
 V_REST          = -60                           # resting potential     
 
+a_RS            = 0.001 
+b_RS            = 0.1   # full adaptation
+b_RS            = 0.005 # weaker adaptation
+a_LTS           = 0.02
+b_LTS           = 0.0
+a_FS            = 0.001
+b_FS            = 0.0
+
+TAU_W           = 600
+DELTA           = 2.5
+
+
 # Spike parameters
 
 VTR             = -50           # threshold in mV
 VTOP            = 40            # top voltage during spike in mV
 VBOT            = -60           # reset voltage in mV
-REFRACTORY      = 5.0/2         # refractory period in ms (correction for a bug in IF_BG4)
+REFRACTORY      = 5.0/2         # refractory period in ms (correction for a bug in IF_CG4)
 
 # Synapse parameters
 
@@ -96,31 +108,83 @@ STOPSTIM        = 50            # duration of stimulation (ms)
 NSYN_STIM       = 20            # nb of stim (exc) synapses per neuron
 STIM_INTERVAL   = 70            # mean interval between stims (ms)
 
+MODEL_ID        = "cx05_LTS500b"
+
+NEURONS_TO_PLOT = [0, 10, 20, 30, N_E, N_E+10]
+NEURONS_TO_RECORD = [170, 0, N_STIM-1]
 
 #-----------------------------------------------------------------
 #  Create cells
 #-----------------------------------------------------------------
 
-class CXcell(object):
+class AdExpNeuron(object):
   
-  def __init__(self):
-    self.soma = nrn.Section()
-    self.soma.insert('pas')
-    self.adexp = h.AdExpIF(0.5, sec=self.soma)
-    self.nclist = []
-    self.spike_times = h.Vector()
-    self.rec = h.NetCon(self.soma(0.5)._ref_v, None, VTR,
-                        0.0, 0.0, sec=self.soma)
-    self.rec.record(self.spike_times)
+    def __init__(self, length=100, diameter=100/pi, g_pas=1e-5, e_pas=-60,
+                 v_thresh=-50, t_refrac=2.0, v_peak=40, v_reset=-70, v_spike=-40,
+                 spikewidth=1e-12, a=0.001, b=0, tau_w=600, delta=2.5):
+        self.soma = nrn.Section()
+        self.soma.insert('pas')
+        self.adexp = h.AdExpIF(0.5, sec=self.soma)
+    
+        self.soma.L         = length
+        self.soma.diam      = diameter
+        self.soma.e_pas     = e_pas
+        self.soma.g_pas     = g_pas
+        self.adexp.vthresh = v_thresh # spike threshold for exponential calculation purposes
+        self.adexp.trefrac = t_refrac # add the DT for compatibility with IF_CG4
+        self.adexp.vpeak   = v_peak
+        self.adexp.vreset  = v_reset
+        self.adexp.vspike  = v_spike # spike-detection threshold
+        self.adexp.spikewidth = spikewidth # for display purposes
+        self.adexp.a        = a
+        self.adexp.b        = b
+        self.adexp.tauw    = tau_w
+        self.adexp.EL       = self.soma.e_pas
+        self.adexp.GL       = self.soma.g_pas*self.area()*1e-2
+        self.adexp.delta    = delta
+    
+        self.nclist = []
+        self.spike_times = h.Vector()
+        self.rec = h.NetCon(self.soma(0.5)._ref_v, None, v_spike,
+                            0.0, 0.0, sec=self.soma)
+        self.rec.record(self.spike_times)
+
+    def area(self):
+        return self.soma.L * self.soma.diam * pi
+
+    def record_v(self):
+        """record the Vm"""
+        npt = int(float(h.tstop)/h.dt)
+        self.Vm = h.Vector(npt)
+        self.Vm.record(self.soma(0.5)._ref_v, h.dt)    
+
+    def write_v(self, filename):
+        f = open(filename, 'w')
+        tt=0
+        npt = int(float(h.tstop)/h.dt)
+        f.write("%g %g\n" % (npt, h.dt))
+        for i in range(0, npt):
+            f.write("%g %g\n" % (tt, self.Vm.get(i)))
+            tt = tt + h.dt
+        f.close()                     # close file
 
 
-class THcell(object):
-  
-  def __init__(self):
-    self.soma = nrn.Section()
-    self.soma.insert('pas')
-    self.adexp = h.AdExpIF(0.5, sec=self.soma)
-    self.nclist = []
+class CXcell(AdExpNeuron):
+    pass
+
+class THcell(AdExpNeuron):
+    pass
+
+class SpikeGen(object):
+    
+    def __init__(self, section, latency=0, shutoff=1e6, invl=10, min_val=0, max_val=50):
+        self.g = h.gen(0.5, sec=section)
+        self.g.latency = latency
+        self.g.shutoff = shutoff
+        self.g.invl = invl
+        self.g.noise = 1           # noisy stimulus        
+        self.g.min_val = min_val
+        self.g.max_val = max_val
 
 #-----------------------------------------------------------------
 #  Create Network
@@ -130,72 +194,36 @@ neuron = []
 rLTS = h.Random(SEED_LTS)
 nLTS = 0
 
-def area(sec):
-    return sec.L * sec.diam * pi
-
 def netCreate ():
     global nLTS
+    RS_parameters = {
+        'length': LENGTH, 'diameter': DIAMETER, 'g_pas': G_L, 'e_pas': V_REST,
+        'v_thresh': VTR, 't_refrac': REFRACTORY+DT, 'v_peak': VTOP,
+        'v_reset': VBOT, 'v_spike': VTR, 'spikewidth': DT, 'a': a_RS, 'b': b_RS,
+        'tau_w': TAU_W, 'delta': DELTA
+    }
+    LTS_parameters = RS_parameters.copy()
+    LTS_parameters.update({'a': a_LTS, 'b': b_LTS})
+    FS_parameters = RS_parameters.copy()
+    FS_parameters.update({'a': a_FS, 'b': b_FS})
+
     for nbactual in range(0, N_E):      # create cortical cells (excitatory)
-        neuron.append(CXcell())
-        assert len(neuron) == nbactual+1
-        soma = neuron[nbactual].soma
-        adexp = neuron[nbactual].adexp
-        soma.L = LENGTH
-        soma.diam = DIAMETER
-        soma.e_pas = V_REST
-        soma.g_pas = G_L
-        adexp.vthresh = VTR # spike threshold for exponential calculation purposes
-        adexp.trefrac = REFRACTORY + DT # add the DT for compatibility with IF_BG4
-        adexp.vpeak = VTOP
-        adexp.vreset = VBOT
-        adexp.vspike = VTR # spike-detection threshold
-        adexp.spikewidth = DT # for display purposes
-
-        # Alain parameters (RS cell)
-        adexp.a        = .001
-        adexp.b        = 0.1           # full adaptation
-        adexp.b        = 0.005         # weaker adaptation
-
         # check if LTS cell
         if rLTS.uniform(0,1) < PROP:
-            print "Cell ",nbactual," is LTS"
-            adexp.a     = .02           # LTS cell
-            adexp.b     = 0             # LTS cell
+            print "Cell ", nbactual, " is LTS"
+            neuron.append(CXcell(**LTS_parameters))
             nLTS = nLTS + 1
+        else:
+            neuron.append(CXcell(**RS_parameters))
+        assert len(neuron) == nbactual+1
 
-        adexp.tauw    = 600
-        adexp.EL       = soma.e_pas
-        adexp.GL       = soma.g_pas*area(soma)*1e-2
-        adexp.delta    = 2.5
-           
         setExpAMPA(nbactual)
         setExpGABA(nbactual)
         setExpStim(nbactual)
 
     for nbactual in range(N_E, N_CX):     # create cortical cells (inhibitory)
-        neuron.append(CXcell())
+        neuron.append(CXcell(**FS_parameters))
         assert len(neuron) == nbactual+1
-        soma = neuron[nbactual].soma
-        adexp = neuron[nbactual].adexp
-        soma.L = LENGTH
-        soma.diam = DIAMETER
-        soma.e_pas = V_REST
-        soma.g_pas = G_L
-        adexp.vthresh = VTR
-        adexp.trefrac = REFRACTORY + DT
-        adexp.vpeak = VTOP
-        adexp.vreset = VBOT
-        adexp.vspike = VTR # spike-detection threshold
-        adexp.spikewidth = DT # for display purposes
-
-        # Alain parameters (FS cell)
-        adexp.a        = .001
-        adexp.b        = 0             # no adaptation
-        adexp.tauw    = 600
-        adexp.EL       = soma.e_pas
-        adexp.GL       = soma.g_pas*area(soma)*1e-2
-        adexp.delta    = 2.5
-
         setExpAMPA(nbactual)
         setExpGABA(nbactual)
         setExpStim(nbactual)
@@ -207,10 +235,9 @@ def setExpAMPA(id):
     neuron[id].ampa.gmax = AMPA_GMAX        # max conductance
     neuron[id].ampa.id = id                 # id of cell
     h.Erev_multiAMPAexp = V_E         # excitatory reversal (mV)
-    h.Prethresh_multiAMPAexp = VTR    # voltage treshold for release (mV)
+    h.Prethresh_multiAMPAexp = VTR    # voltage threshold for release (mV)
     h.Deadtime_multiAMPAexp = 2 * DT  # synapse "refractory"
     h.Beta_multiAMPAexp = 1.0 / TAU_E   # inhibition time constant
-
 
 def setExpGABA(id):
     neuron[id].gaba = h.multiGABAAexp(0.5, sec=neuron[id].soma)
@@ -219,7 +246,7 @@ def setExpGABA(id):
     neuron[id].gaba.gmax = GABA_GMAX        # max conductance
     neuron[id].gaba.id = -id                # id of cell
     h.Erev_multiGABAAexp = V_I        # inhibitory reversal (mV)
-    h.Prethresh_multiGABAAexp = VTR   # voltage treshold for release (mV)
+    h.Prethresh_multiGABAAexp = VTR   # voltage threshold for release (mV)
     h.Deadtime_multiGABAAexp = 2 * DT # synapse "refractory"
     h.Beta_multiGABAAexp = 1.0 / TAU_I  # inhibition time constant
 
@@ -230,7 +257,7 @@ def setExpStim(id):
     neuron[id].stimsyn.gmax = AMPA_GMAX*scale
     neuron[id].stimsyn.id = 15000 + id
     h.Erev_multiStimexp = V_E         # excitatory reversal potential
-    h.Prethresh_multiStimexp = VTR    # voltage treshold for release (mV)
+    h.Prethresh_multiStimexp = VTR    # voltage threshold for release (mV)
     h.Deadtime_multiStimexp = 0       # no synapse response to input
     h.Beta_multiStimexp = 1.0 / TAU_E
 
@@ -240,13 +267,11 @@ rCon = h.Random(SEED_CONN)
 
 PRINT = 2        # flag to print; 0=minimal, 1=verbose, 2=summary
 
-ne = 0
-ni = 0
-ie = 0
-ii = 0
-
 def netConnect(): # local i, j, rand, distvert, nbconn
-    global ne, ni, ie, ii   
+    ne = 0
+    ni = 0
+    ie = 0
+    ii = 0
     print "Calculate connectivity of cortical cells..."
     # scan cortical cells
     for i in range(0, N_CX):
@@ -298,20 +323,16 @@ stim = []
 
 def insertStimulation():
     print "Add stimulation of cortical neurons..."
+    spike_gen_parameters = {'latency': TSTART, 'shutoff': STOPSTIM,
+                            'invl': STIM_INTERVAL, 'min_val': VBOT,
+                            'max_val': VTOP}
     for i in range(0, N_STIM):
-        #access neuron[i].soma
         for j in range(0, nstim):
-            g = h.gen(0.5, sec=neuron[i].soma)
+            g = SpikeGen(neuron[i].soma, **spike_gen_parameters)
             stim.append(g)
-            g.latency = TSTART
-            g.shutoff = STOPSTIM
-            g.invl = STIM_INTERVAL
-            g.noise = 1           # noisy stimulus        
-            g.min_val = VBOT
-            g.max_val = VTOP
-            neuron[i].stimsyn.addlink(g._ref_x)
+            neuron[i].stimsyn.addlink(g.g._ref_x)
             neuron[i].nclist.extend(stim)
-    neuron[0].nclist[0].seed(SEED_GEN)
+    neuron[0].nclist[0].g.seed(SEED_GEN)
 
 #-----------------------------------------------------------------
 # Simulation settings
@@ -374,51 +395,14 @@ insertStimulation()
 nspikes = []
 
 def write_spikes():
-  f = open("spiketimes_cx05_LTS500b.dat", 'w')
-  for i in range(0, N_GEN):
-    nspikes.append(neuron[i].spike_times.size())
-    for j in range(0, int(nspikes[i])):
-        f.write("%g %g\n" % (i, neuron[i].spike_times.x[j]))
-  f.close()
-
-#-----------------------------------------------------------------
-#  Graphs
-#-----------------------------------------------------------------
-
-h('objref py')
-h.py = h.PythonObject() # lets Hoc access Python
-h.nrnmainmenu()
-h.nrncontrolmenu()
+    f = open("spiketimes_%s.dat" % MODEL_ID, 'w')
+    for i in range(0, N_GEN):
+        nspikes.append(neuron[i].spike_times.size())
+        for j in range(0, int(nspikes[i])):
+            f.write("%g %g\n" % (i, neuron[i].spike_times.x[j]))
+    f.close()
   
-# access origin of network
-##access neuron[0].soma
-
-# adding graphs
-addgraph(-80, 40, "py.neuron[0].soma(0.5).v", 4)   # excitatory CX
-addgraph(-80, 40, "py.neuron[10].soma(0.5).v", 4)
-addgraph(-80, 40, "py.neuron[20].soma(0.5).v", 4)
-addgraph(-80, 40, "py.neuron[30].soma(0.5).v", 4)
-
-addgraph(-80, 40, "py.neuron[%d].soma(0.5).v" % N_E, 4)  # inhibitory CX
-addgraph(-80, 40, "py.neuron[%d].soma(0.5).v" % (N_E+10,), 4)
-
-npt = int(float(h.tstop)/h.dt)
-Vm = h.Vector(npt)
-Vm.record(neuron[170].soma(0.5)._ref_v, h.dt)          # record the Vm
-
-
-#-----------------------------------------------------------------
-# Procedure to run simulation and menu
-#-----------------------------------------------------------------
-
-def run_sim():
-    h.init()
-    h.run()
-
-    print "Writing spikes on file..."
-    write_spikes()
-    
-    f = open("numspikes_cx05_LTS500b.dat", 'w')
+    f = open("numspikes_%s.dat" % MODEL_ID, 'w')
     f.write("%g %g\n" % (N_GEN, h.t))             # write nb of cells and time
     sum1 = 0
     sum2 = 0
@@ -437,21 +421,47 @@ def run_sim():
 
     sum1 = float(sum1) / N_E
     sum2 = sqrt( float(sum2)/N_E - sum1**2 )
-    print "Mean rate per RS cell (Hz) = ", sum1
-    print " standard deviation = ", sum2
     sum3 = float(sum3) / N_I
     sum4 = sqrt( float(sum4)/N_I - sum3**2 )
-    print "Mean rate per FS cell (Hz) = ", sum3
-    print " standard deviation = ", sum4
+    return sum1, sum2, sum3, sum4
 
-    f = open("Vm170_cx05_LTS500b.dat", 'w')
-    tt=0
-    f.write("%g %g\n" % (npt, h.dt))
-    for i in range(0, npt):
-        f.write("%g %g\n" % (tt, Vm.get(i)))
-        tt = tt + h.dt
-  
-    f.close()                     # close file
+
+
+#-----------------------------------------------------------------
+#  Graphs
+#-----------------------------------------------------------------
+
+h('objref py')
+h.py = h.PythonObject() # lets Hoc access Python
+h.nrnmainmenu()
+h.nrncontrolmenu()
+
+# adding graphs
+for id in NEURONS_TO_PLOT:
+    addgraph(-80, 40, "py.neuron[%d].soma(0.5).v" % id, 4)
+
+# record the Vm
+for id in NEURONS_TO_RECORD:
+    neuron[id].record_v()          
+
+#-----------------------------------------------------------------
+# Procedure to run simulation and menu
+#-----------------------------------------------------------------
+
+def run_sim():
+    h.init()
+    h.run()
+
+    print "Writing spikes to file..."
+    rate_RS, std_RS, rate_FS, std_FS = write_spikes()
+    
+    print "Mean rate per RS cell (Hz) = ", rate_RS
+    print " standard deviation = ", std_RS
+    print "Mean rate per FS cell (Hz) = ", rate_FS
+    print " standard deviation = ", std_FS
+    
+    for id in NEURONS_TO_RECORD:
+        neuron[id].write_v("Vm%d_%s.dat" % (id, MODEL_ID))
 
 def make_Vpanel():                    # make panel
     h.xpanel("Brette-Gerstner network")

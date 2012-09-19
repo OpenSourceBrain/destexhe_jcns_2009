@@ -21,6 +21,7 @@
   
  Refactoring of original Python conversion of Alain's Hoc file, putting more
  of the code into the cell classes.
+ Replaced multiStimexp, multiAMPAexp and multiGABAAexp with ExpSyn
 """
 
 from neuron import h, nrn, gui, load_mechanisms
@@ -121,7 +122,8 @@ class AdExpNeuron(object):
   
     def __init__(self, length=100, diameter=100/pi, g_pas=1e-5, e_pas=-60,
                  v_thresh=-50, t_refrac=2.0, v_peak=40, v_reset=-70, v_spike=-40,
-                 spikewidth=1e-12, a=0.001, b=0, tau_w=600, delta=2.5):
+                 spikewidth=1e-12, a=0.001, b=0, tau_w=600, delta=2.5,
+                 tau_esyn=2.0, e_e=0.0, tau_isyn=2.0, e_i=-70):
         self.soma = nrn.Section()
         self.soma.insert('pas')
         self.adexp = h.AdExpIF(0.5, sec=self.soma)
@@ -143,7 +145,17 @@ class AdExpNeuron(object):
         self.adexp.GL       = self.soma.g_pas*self.area()*1e-2
         self.adexp.delta    = delta
     
-        self.nclist = []
+        self.esyn = h.ExpSyn(0.5, sec=self.soma)
+        self.esyn.tau = tau_esyn
+        self.esyn.e = e_e
+        
+        self.isyn = h.ExpSyn(0.5, sec=self.soma)
+        self.isyn.tau = tau_isyn
+        self.isyn.e = e_i
+    
+        self.stimsyn_list = []
+        self.ampa_list = []
+        self.gabaa_list = []
         self.spike_times = h.Vector()
         self.rec = h.NetCon(self.soma(0.5)._ref_v, None, v_spike,
                             0.0, 0.0, sec=self.soma)
@@ -186,6 +198,7 @@ class SpikeGen(object):
         self.g.min_val = min_val
         self.g.max_val = max_val
 
+
 #-----------------------------------------------------------------
 #  Create Network
 #-----------------------------------------------------------------
@@ -200,7 +213,8 @@ def netCreate ():
         'length': LENGTH, 'diameter': DIAMETER, 'g_pas': G_L, 'e_pas': V_REST,
         'v_thresh': VTR, 't_refrac': REFRACTORY+DT, 'v_peak': VTOP,
         'v_reset': VBOT, 'v_spike': VTR, 'spikewidth': DT, 'a': a_RS, 'b': b_RS,
-        'tau_w': TAU_W, 'delta': DELTA
+        'tau_w': TAU_W, 'delta': DELTA, 'tau_esyn': TAU_E, 'e_e': V_E,
+        'tau_isyn': TAU_I, 'e_i': V_I
     }
     LTS_parameters = RS_parameters.copy()
     LTS_parameters.update({'a': a_LTS, 'b': b_LTS})
@@ -215,51 +229,9 @@ def netCreate ():
             nLTS = nLTS + 1
         else:
             neuron.append(CXcell(**RS_parameters))
-        assert len(neuron) == nbactual+1
-
-        setExpAMPA(nbactual)
-        setExpGABA(nbactual)
-        setExpStim(nbactual)
 
     for nbactual in range(N_E, N_CX):     # create cortical cells (inhibitory)
         neuron.append(CXcell(**FS_parameters))
-        assert len(neuron) == nbactual+1
-        setExpAMPA(nbactual)
-        setExpGABA(nbactual)
-        setExpStim(nbactual)
-
-def setExpAMPA(id):
-    neuron[id].ampa = h.multiAMPAexp(0.5, sec=neuron[id].soma)
-    neuron[id].ampa.allocate(C_E)           # allocate space for synapse
-    neuron[id].ampa.q = 1
-    neuron[id].ampa.gmax = AMPA_GMAX        # max conductance
-    neuron[id].ampa.id = id                 # id of cell
-    h.Erev_multiAMPAexp = V_E         # excitatory reversal (mV)
-    h.Prethresh_multiAMPAexp = VTR    # voltage threshold for release (mV)
-    h.Deadtime_multiAMPAexp = 2 * DT  # synapse "refractory"
-    h.Beta_multiAMPAexp = 1.0 / TAU_E   # inhibition time constant
-
-def setExpGABA(id):
-    neuron[id].gaba = h.multiGABAAexp(0.5, sec=neuron[id].soma)
-    neuron[id].gaba.allocate(C_I)           # allocate space for synapse
-    neuron[id].gaba.q = 1
-    neuron[id].gaba.gmax = GABA_GMAX        # max conductance
-    neuron[id].gaba.id = -id                # id of cell
-    h.Erev_multiGABAAexp = V_I        # inhibitory reversal (mV)
-    h.Prethresh_multiGABAAexp = VTR   # voltage threshold for release (mV)
-    h.Deadtime_multiGABAAexp = 2 * DT # synapse "refractory"
-    h.Beta_multiGABAAexp = 1.0 / TAU_I  # inhibition time constant
-
-def setExpStim(id):
-    neuron[id].stimsyn = h.multiStimexp(0.5, sec=neuron[id].soma)
-    neuron[id].stimsyn.allocate(NSYN_STIM)
-    neuron[id].stimsyn.q = 1
-    neuron[id].stimsyn.gmax = AMPA_GMAX*scale
-    neuron[id].stimsyn.id = 15000 + id
-    h.Erev_multiStimexp = V_E         # excitatory reversal potential
-    h.Prethresh_multiStimexp = VTR    # voltage threshold for release (mV)
-    h.Deadtime_multiStimexp = 0       # no synapse response to input
-    h.Beta_multiStimexp = 1.0 / TAU_E
 
 #  Connect cells
 
@@ -288,7 +260,10 @@ def netConnect(): # local i, j, rand, distvert, nbconn
         while (nbconex < C_E) and (j < N_E):
             rand = rCon.uniform(0.0, 1.0)
             if (i != j) and (rand <= PROB_CONNECT):
-                neuron[i].ampa.addlink(neuron[j].soma(0.5)._ref_v)
+                nc = h.NetCon(neuron[j].soma(0.5)._ref_v, neuron[i].esyn,
+                          neuron[j].adexp.v_spike, 0.0, AMPA_GMAX,
+                          sec=neuron[j].soma)
+                neuron[i].ampa_list.append(nc)
                 nbconex = nbconex + 1    
             j = j + 1
         if PRINT==1:
@@ -301,7 +276,10 @@ def netConnect(): # local i, j, rand, distvert, nbconn
         while (nbconin < C_I) and (j < N_CX):
             rand = rCon.uniform(0.0, 1.0)
             if (i != j) and (rand <= PROB_CONNECT):
-                neuron[i].gaba.addlink(neuron[j].soma(0.5)._ref_v)
+                nc = h.NetCon(neuron[j].soma(0.5)._ref_v, neuron[i].isyn,
+                          neuron[j].adexp.v_spike, 0.0, GABA_GMAX,
+                          sec=neuron[j].soma)
+                neuron[i].gabaa_list.append(nc)
                 nbconin = nbconin + 1
             j = j + 1
         if PRINT==1:
@@ -330,9 +308,11 @@ def insertStimulation():
         for j in range(0, nstim):
             g = SpikeGen(neuron[i].soma, **spike_gen_parameters)
             stim.append(g)
-            neuron[i].stimsyn.addlink(g.g._ref_x)
-            neuron[i].nclist.extend(stim)
-    neuron[0].nclist[0].g.seed(SEED_GEN)
+            nc = h.NetCon(g.g._ref_x, neuron[i].esyn,
+                          neuron[i].adexp.v_spike, 0.0, AMPA_GMAX*scale,
+                          sec=neuron[i].soma)
+            neuron[i].stimsyn_list.append(nc)
+    g.g.seed(SEED_GEN)
 
 #-----------------------------------------------------------------
 # Simulation settings

@@ -231,7 +231,7 @@ def netConnect(): # local i, j, rand, distvert, nbconn
             rand = rCon.uniform(0.0, 1.0)
             if (i != j) and (rand <= PROB_CONNECT):
                 nc = h.NetCon(neuron[j].source, neuron[i].isyn,
-                          neuron[j].adexp.vspike, 0.0, GABA_GMAX,
+                          neuron[j].adexp.vspike, DT, GABA_GMAX,
                           sec=neuron[j])
                 gabaa_list.append(nc)
                 nbconin = nbconin + 1
@@ -262,7 +262,7 @@ def insertStimulation():
             g = SpikeGen(**spike_gen_parameters)
             stim.append(g)
             nc = h.NetCon(g.g, neuron[i].esyn,
-                          0, 0.0, AMPA_GMAX*scale,
+                          0, DT, AMPA_GMAX*scale,
                           sec=neuron[i])
             stimsyn_list.append(nc)
     g.g.seed(SEED_GEN)

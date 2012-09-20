@@ -215,7 +215,7 @@ def netConnect(): # local i, j, rand, distvert, nbconn
             rand = rCon.uniform(0.0, 1.0)
             if (i != j) and (rand <= PROB_CONNECT):
                 nc = h.NetCon(neuron[j].source, neuron[i].esyn,
-                          neuron[j].adexp.vspike, 0.0, AMPA_GMAX,
+                          neuron[j].adexp.vspike, DT, AMPA_GMAX,
                           sec=neuron[j])
                 ampa_list.append(nc)
                 nbconex = nbconex + 1    

@@ -25,11 +25,13 @@
  Replaced IF_BG4 with AdExpIF
  Replaced gen mechanism with NetSimFD
  Replaced locally-defined AdExp cell class with BretteGerstnerIF from pyNN.neuron
+ Replaced list of cells by PyNN Population
 """
 
 from neuron import h, nrn, gui
 from math import sqrt, pi
 from pyNN.neuron.cells import BretteGerstnerIF
+import pyNN.neuron as pyNN
 
 h.load_file("nrngui.hoc")
     
@@ -69,7 +71,6 @@ b_FS            = 0.0
 
 TAU_W           = 600
 DELTA           = 2.5
-
 
 # Spike parameters
 
@@ -119,16 +120,6 @@ NEURONS_TO_RECORD = [170, 0, N_STIM-1]
 #  Create cells
 #-----------------------------------------------------------------
 
-class CXcell(BretteGerstnerIF):
-    
-    def __init__(self, **parameters):
-        parameters['A'] = parameters.pop('a')
-        parameters['B'] = parameters.pop('b')
-        BretteGerstnerIF.__init__(self, 'conductance', 'exp', **parameters)
-
-class THcell(BretteGerstnerIF):
-    pass
-
 class SpikeGen(object):
     
     def __init__(self, latency=0, shutoff=1e6, invl=10):
@@ -142,46 +133,42 @@ class SpikeGen(object):
 #  Create Network
 #-----------------------------------------------------------------
 
-neuron = []
 rLTS = h.Random(SEED_LTS)
 nLTS = 0
 
 def netCreate ():
-    global nLTS
+    global nLTS, neurons
     RS_parameters = {
-        'c_m': 1000*AREA*CAPACITANCE, 'tau_m': TAU, 'v_rest': V_REST,
-        'v_thresh': VTR, 't_refrac': REFRACTORY+DT,
-        'v_reset': VBOT, 'v_spike': VTR, 'a': a_RS, 'b': b_RS,
-        'tau_w': TAU_W, 'delta': DELTA, 'tau_e': TAU_E, 'e_e': V_E,
-        'tau_i': TAU_I, 'e_i': V_I
+        'cm': 1000*AREA*CAPACITANCE, 'tau_m': TAU, 'v_rest': V_REST,
+        'v_thresh': VTR, 'tau_refrac': REFRACTORY+DT,
+        'v_reset': VBOT, 'v_spike': VTR, 'a': 1000.0*a_RS, 'b': b_RS,
+        'tau_w': TAU_W, 'delta_T': DELTA, 'tau_syn_E': TAU_E, 'e_rev_E': V_E,
+        'tau_syn_I': TAU_I, 'e_rev_I': V_I
     }
     
     LTS_parameters = RS_parameters.copy()
-    LTS_parameters.update({'a': a_LTS, 'b': b_LTS})
+    LTS_parameters.update({'a': 1000.0*a_LTS, 'b': b_LTS}) # 1000 is for uS --> nS
     FS_parameters = RS_parameters.copy()
-    FS_parameters.update({'a': a_FS, 'b': b_FS})
+    FS_parameters.update({'a': 1000.0*a_FS, 'b': b_FS})
 
+    neurons = pyNN.Population(N_CX, pyNN.EIF_cond_exp_isfa_ista, RS_parameters)
     for nbactual in range(0, N_E):      # create cortical cells (excitatory)
         # check if LTS cell
         if rLTS.uniform(0,1) < PROP:
             print "Cell ", nbactual, " is LTS"
-            neuron.append(CXcell(**LTS_parameters))
+            neurons[nbactual].set_parameters(**LTS_parameters)
             nLTS = nLTS + 1
-        else:
-            neuron.append(CXcell(**RS_parameters))
-        # need to set spikewidth separately = DT
-        # ditto v_peak = VTOP
-        neuron[nbactual].adexp.spikewidth = DT
-        neuron[nbactual].adexp.vpeak = VTOP
-        neuron[nbactual].v_init = V_INIT
-        neuron[nbactual].w_init = 0.0
+        neurons[nbactual]._cell.adexp.spikewidth = DT
+        neurons[nbactual]._cell.adexp.vpeak = VTOP
 
     for nbactual in range(N_E, N_CX):     # create cortical cells (inhibitory)
-        neuron.append(CXcell(**FS_parameters))
-        neuron[nbactual].adexp.spikewidth = DT
-        neuron[nbactual].adexp.vpeak = VTOP
-        neuron[nbactual].v_init = V_INIT
-        neuron[nbactual].w_init = 0.0
+        neurons[nbactual].set_parameters(**FS_parameters)
+        neurons[nbactual]._cell.adexp.spikewidth = DT
+        neurons[nbactual]._cell.adexp.vpeak = VTOP
+    
+    neurons.initialize('v', V_INIT)
+    neurons.initialize('w', 0.0)
+
 
 #  Connect cells
 
@@ -214,9 +201,9 @@ def netConnect(): # local i, j, rand, distvert, nbconn
         while (nbconex < C_E) and (j < N_E):
             rand = rCon.uniform(0.0, 1.0)
             if (i != j) and (rand <= PROB_CONNECT):
-                nc = h.NetCon(neuron[j].source, neuron[i].esyn,
-                          neuron[j].adexp.vspike, DT, AMPA_GMAX,
-                          sec=neuron[j])
+                nc = h.NetCon(neurons[j]._cell.source, neurons[i]._cell.esyn,
+                          neurons[j]._cell.adexp.vspike, DT, AMPA_GMAX,
+                          sec=neurons[j]._cell)
                 ampa_list.append(nc)
                 nbconex = nbconex + 1    
             j = j + 1
@@ -230,9 +217,9 @@ def netConnect(): # local i, j, rand, distvert, nbconn
         while (nbconin < C_I) and (j < N_CX):
             rand = rCon.uniform(0.0, 1.0)
             if (i != j) and (rand <= PROB_CONNECT):
-                nc = h.NetCon(neuron[j].source, neuron[i].isyn,
-                          neuron[j].adexp.vspike, DT, GABA_GMAX,
-                          sec=neuron[j])
+                nc = h.NetCon(neurons[j]._cell.source, neurons[i]._cell.isyn,
+                          neurons[j]._cell.adexp.vspike, DT, GABA_GMAX,
+                          sec=neurons[j]._cell)
                 gabaa_list.append(nc)
                 nbconin = nbconin + 1
             j = j + 1
@@ -261,9 +248,9 @@ def insertStimulation():
         for j in range(0, nstim):
             g = SpikeGen(**spike_gen_parameters)
             stim.append(g)
-            nc = h.NetCon(g.g, neuron[i].esyn,
+            nc = h.NetCon(g.g, neurons[i]._cell.esyn,
                           0, DT, AMPA_GMAX*scale,
-                          sec=neuron[i])
+                          sec=neurons[i]._cell)
             stimsyn_list.append(nc)
     g.g.seed(SEED_GEN)
 
@@ -327,14 +314,7 @@ insertStimulation()
 
 nspikes = []
 
-def write_spikes():
-    f = open("spiketimes_%s.dat" % MODEL_ID, 'w')
-    for i in range(0, N_GEN):
-        nspikes.append(neuron[i].spike_times.size())
-        for j in range(0, int(nspikes[i])):
-            f.write("%g %g\n" % (i, neuron[i].spike_times.x[j]))
-    f.close()
-  
+def write_numspikes():  
     f = open("numspikes_%s.dat" % MODEL_ID, 'w')
     f.write("%g %g\n" % (N_GEN, h.t))             # write nb of cells and time
     sum1 = 0
@@ -342,8 +322,9 @@ def write_spikes():
     sum3 = 0
     sum4 = 0
     for i in range(0, N_GEN):
-        f.write("%g\n" % nspikes[i])       # write tot number of spikes
-        rate = nspikes[i] * 1000.0 / TSTOP
+        nspikes = neurons[i]._cell.spike_times.size()
+        f.write("%g\n" % nspikes)       # write tot number of spikes
+        rate = nspikes * 1000.0 / TSTOP
         if i<N_E:
             sum1 = sum1 + rate
             sum2 = sum2 + rate**2
@@ -358,15 +339,6 @@ def write_spikes():
     sum4 = sqrt( float(sum4)/N_I - sum3**2 )
     return sum1, sum2, sum3, sum4
 
-def write_v(neuron, filename):
-    f = open(filename, 'w')
-    tt=0
-    npt = int(float(h.tstop)/h.dt)
-    f.write("%g %g\n" % (npt, h.dt))
-    for i in range(0, npt):
-        f.write("%g %g\n" % (tt, neuron.vtrace.get(i)))
-        tt = tt + h.dt
-    f.close()                     # close file
 
 #-----------------------------------------------------------------
 #  Graphs
@@ -379,15 +351,13 @@ h.nrncontrolmenu()
 
 # adding graphs
 for id in NEURONS_TO_PLOT:
-    addgraph(-80, 40, "py.neuron[%d].seg.v" % id, 4)
+    addgraph(-80, 40, "py.neurons[%d]._cell.seg.v" % id, 4)
 
 # record spikes
-for cell in neuron:
-    cell.record(active=True)
+neurons.record()
 
-# record the Vm
-for id in NEURONS_TO_RECORD:
-    neuron[id].record_v(active=True)          
+# record the Vm         
+neurons[NEURONS_TO_RECORD].record_v()
 
 #-----------------------------------------------------------------
 # Procedure to run simulation and menu
@@ -398,15 +368,15 @@ def run_sim():
     h.run()
 
     print "Writing spikes to file..."
-    rate_RS, std_RS, rate_FS, std_FS = write_spikes()
-    
+    rate_RS, std_RS, rate_FS, std_FS = write_numspikes()
+    neurons.printSpikes("spiketimes_%s.dat" % MODEL_ID, compatible_output=False)
+    neurons.print_v("Vm_%s.dat" % MODEL_ID, compatible_output=False)
+
     print "Mean rate per RS cell (Hz) = ", rate_RS
     print " standard deviation = ", std_RS
     print "Mean rate per FS cell (Hz) = ", rate_FS
     print " standard deviation = ", std_FS
-    
-    for id in NEURONS_TO_RECORD:
-        write_v(neuron[id], "Vm%d_%s.dat" % (id, MODEL_ID))
+
 
 def make_Vpanel():                    # make panel
     h.xpanel("Brette-Gerstner network")

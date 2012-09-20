@@ -42,7 +42,7 @@ h.load_file("nrngui.hoc")
 
 SEED_LTS = 428577
 SEED_CONN = 193566
-SEED_GEN = 983649
+SEED_GEN = 983651
 
 DT = 0.1                                        # (ms) Time step
 TSTART  = 0                                     

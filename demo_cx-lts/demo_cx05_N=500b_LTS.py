@@ -22,6 +22,8 @@
  Refactoring of original Python conversion of Alain's Hoc file, putting more
  of the code into the cell classes.
  Replaced multiStimexp, multiAMPAexp and multiGABAAexp with ExpSyn
+ Replaced IF_BG4 with AdExpIF
+ Replaced gen mechanism with NetSimFD
 """
 
 from neuron import h, nrn, gui, load_mechanisms
@@ -189,15 +191,12 @@ class THcell(AdExpNeuron):
 
 class SpikeGen(object):
     
-    def __init__(self, section, latency=0, shutoff=1e6, invl=10, min_val=0, max_val=50):
-        self.g = h.gen(0.5, sec=section)
-        self.g.latency = latency
-        self.g.shutoff = shutoff
-        self.g.invl = invl
-        self.g.noise = 1           # noisy stimulus        
-        self.g.min_val = min_val
-        self.g.max_val = max_val
-
+    def __init__(self, latency=0, shutoff=1e6, invl=10):
+        self.g = h.NetStimFD()
+        self.g.start = latency
+        self.g.duration = shutoff-latency
+        self.g.interval = invl
+        self.g.noise = 1           # noisy stimulus
 
 #-----------------------------------------------------------------
 #  Create Network
@@ -302,14 +301,13 @@ stim = []
 def insertStimulation():
     print "Add stimulation of cortical neurons..."
     spike_gen_parameters = {'latency': TSTART, 'shutoff': STOPSTIM,
-                            'invl': STIM_INTERVAL, 'min_val': VBOT,
-                            'max_val': VTOP}
+                            'invl': STIM_INTERVAL}
     for i in range(0, N_STIM):
         for j in range(0, nstim):
-            g = SpikeGen(neuron[i].soma, **spike_gen_parameters)
+            g = SpikeGen(**spike_gen_parameters)
             stim.append(g)
-            nc = h.NetCon(g.g._ref_x, neuron[i].esyn,
-                          neuron[i].adexp.vspike, 0.0, AMPA_GMAX*scale,
+            nc = h.NetCon(g.g, neuron[i].esyn,
+                          0, 0.0, AMPA_GMAX*scale,
                           sec=neuron[i].soma)
             neuron[i].stimsyn_list.append(nc)
     g.g.seed(SEED_GEN)

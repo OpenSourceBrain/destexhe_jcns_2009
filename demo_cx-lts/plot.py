@@ -1,7 +1,7 @@
 """
 Script to plot data from demo_cx05_N=500b_LTS simulation.
 
-Usage: python plot.py <spike_times_file> <spike_counts_file> <vm_file>
+Usage: python plot.py <spike_times_file> <spike_counts_file> <vm_file> <neuron_index>
 
 Andrew Davison, 2012
 """
@@ -26,7 +26,7 @@ def get_version():
 __version__ = get_version()
 
 
-spike_times_file, spike_counts_file, vm_file = sys.argv[1:]
+spike_times_file, spike_counts_file, vm_file, neuron_id = sys.argv[1:]
 
 fig = plt.figure(figsize=(8, 3))
 fig.dpi = 120
@@ -37,6 +37,7 @@ with open(spike_times_file) as fp:
 ids, times = data.T
 
 ax = fig.add_axes((0.1, 0.12, 0.6, 0.55), frameon=False)
+ax.set_xlim([0, TSTOP])
 ax.plot(times, ids, 'b.', markersize=0.2)
 ax.yaxis.set_ticks_position('left')
 ax.xaxis.set_ticks_position('bottom')
@@ -62,12 +63,11 @@ ax.set_xlabel("Firing rate (Hz)")
 ax.set_ylabel("Number of cells")
 
 # Plot sample membrane potential trace
-with open(vm_file) as fp:
-    fp.readline() # first line is metadata
-    data = numpy.loadtxt(fp)
-t, v = data.T
+data = numpy.loadtxt(vm_file)
+id, t, v = data[data[:, 0] == int(neuron_id)].T
 
 ax = fig.add_axes((0.1, 0.73, 0.6, 0.25), frameon=False)
+ax.set_xlim([0, TSTOP])
 ax.plot(t, v, 'r', linewidth=0.8)
 ax.xaxis.set_visible(False)
 ax.yaxis.set_ticks_position('left')

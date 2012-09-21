@@ -25,12 +25,12 @@
  Replaced IF_BG4 with AdExpIF
  Replaced gen mechanism with NetSimFD
  Replaced locally-defined AdExp cell class with BretteGerstnerIF from pyNN.neuron
- Replaced list of cells by PyNN Population
+ Replaced list of cells and list of spike sources by PyNN Populations
+ Replaced direct NetCon creation with pyNN.connect()
 """
 
 from neuron import h, nrn, gui
 from math import sqrt, pi
-from pyNN.neuron.cells import BretteGerstnerIF
 import pyNN.neuron as pyNN
 
 h.load_file("nrngui.hoc")
@@ -201,9 +201,8 @@ def netConnect(): # local i, j, rand, distvert, nbconn
         while (nbconex < C_E) and (j < N_E):
             rand = rCon.uniform(0.0, 1.0)
             if (i != j) and (rand <= PROB_CONNECT):
-                nc = h.NetCon(neurons[j]._cell.source, neurons[i]._cell.esyn,
-                          neurons[j]._cell.adexp.vspike, DT, AMPA_GMAX,
-                          sec=neurons[j]._cell)
+                nc = pyNN.connect(neurons[j], neurons[i], weight=AMPA_GMAX,
+                                  delay=DT, synapse_type="esyn")
                 ampa_list.append(nc)
                 nbconex = nbconex + 1    
             j = j + 1
@@ -217,9 +216,8 @@ def netConnect(): # local i, j, rand, distvert, nbconn
         while (nbconin < C_I) and (j < N_CX):
             rand = rCon.uniform(0.0, 1.0)
             if (i != j) and (rand <= PROB_CONNECT):
-                nc = h.NetCon(neurons[j]._cell.source, neurons[i]._cell.isyn,
-                          neurons[j]._cell.adexp.vspike, DT, GABA_GMAX,
-                          sec=neurons[j]._cell)
+                nc = pyNN.connect(neurons[j], neurons[i], weight=GABA_GMAX,
+                                  delay=DT, synapse_type="isyn")
                 gabaa_list.append(nc)
                 nbconin = nbconin + 1
             j = j + 1
@@ -242,27 +240,23 @@ stim = []
 
 def insertStimulation():
     print "Add stimulation of cortical neurons..."
-    spike_gen_parameters = {'latency': TSTART, 'shutoff': STOPSTIM,
-                            'invl': STIM_INTERVAL}
+    spike_gen_parameters = {'start': TSTART, 'duration': STOPSTIM-TSTART,
+                            'rate': 1000.0/STIM_INTERVAL}
     for i in range(0, N_STIM):
-        for j in range(0, nstim):
-            g = SpikeGen(**spike_gen_parameters)
-            stim.append(g)
-            nc = h.NetCon(g.g, neurons[i]._cell.esyn,
-                          0, DT, AMPA_GMAX*scale,
-                          sec=neurons[i]._cell)
-            stimsyn_list.append(nc)
-    g.g.seed(SEED_GEN)
+        G = pyNN.Population(nstim, pyNN.SpikeSourcePoisson, spike_gen_parameters)
+        stim.append(G)
+        ncs = pyNN.connect(G, neurons[i], weight=AMPA_GMAX*scale, delay=DT,
+                           synapse_type='esyn')
+        stimsyn_list.append(ncs)
+    G[-1]._cell.seed(SEED_GEN)
 
 #-----------------------------------------------------------------
 # Simulation settings
 #-----------------------------------------------------------------
 
-h.dt = DT
-h.steps_per_ms = 1.0/DT
-tstart = TSTART
+pyNN.setup(DT, min_delay=DT)
 h.tstop = TSTOP
-h.v_init = V_INIT
+
 
 #-----------------------------------------------------------------
 #  Add graphs
@@ -270,13 +264,14 @@ h.v_init = V_INIT
 
 g = [None]*20
 ngraph = 0
+h.steps_per_ms = 1.0/DT
 
 def addgraph(v_min, v_max, label, colour):
     global ngraph
     ngraph = ngraph+1
     ii = ngraph-1
     g[ii] = h.Graph()
-    g[ii].size(tstart, h.tstop, v_min, v_max)
+    g[ii].size(TSTART, h.tstop, v_min, v_max)
     g[ii].xaxis()
     g[ii].yaxis()
     g[ii].addexpr(label, colour, 0)

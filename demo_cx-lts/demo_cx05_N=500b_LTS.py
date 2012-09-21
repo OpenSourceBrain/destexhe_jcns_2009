@@ -120,14 +120,8 @@ NEURONS_TO_RECORD = [170, 0, N_STIM-1]
 #  Create cells
 #-----------------------------------------------------------------
 
-class SpikeGen(object):
-    
-    def __init__(self, latency=0, shutoff=1e6, invl=10):
-        self.g = h.NetStimFD()
-        self.g.start = latency
-        self.g.duration = shutoff-latency
-        self.g.interval = invl
-        self.g.noise = 1           # noisy stimulus
+# we now use a standard cell model from PyNN, so there is nothing to do here
+
 
 #-----------------------------------------------------------------
 #  Create Network
@@ -255,8 +249,6 @@ def insertStimulation():
 #-----------------------------------------------------------------
 
 pyNN.setup(DT, min_delay=DT)
-h.tstop = TSTOP
-
 
 #-----------------------------------------------------------------
 #  Add graphs
@@ -339,14 +331,15 @@ def write_numspikes():
 #  Graphs
 #-----------------------------------------------------------------
 
-h('objref py')
-h.py = h.PythonObject() # lets Hoc access Python
-h.nrnmainmenu()
-h.nrncontrolmenu()
+def create_graphs():
+    h('objref py')
+    h.py = h.PythonObject() # lets Hoc access Python
+    h.nrnmainmenu()
+    h.nrncontrolmenu()
 
-# adding graphs
-for id in NEURONS_TO_PLOT:
-    addgraph(-80, 40, "py.neurons[%d]._cell.seg.v" % id, 4)
+    # adding graphs
+    for id in NEURONS_TO_PLOT:
+        addgraph(-80, 40, "py.neurons[%d]._cell.seg.v" % id, 4)
 
 # record spikes
 neurons.record()
@@ -358,9 +351,16 @@ neurons[NEURONS_TO_RECORD].record_v()
 # Procedure to run simulation and menu
 #-----------------------------------------------------------------
 
-def run_sim():
-    h.init()
-    h.run()
+def run_sim(with_graphs=False):
+    if with_graphs:
+        create_graphs()
+        h.v_init = V_INIT
+        h.init()
+        h.tstop = TSTOP
+        h.run()
+    else:
+        h.finitialize() # this is called by pyNN.run(), but needs to be called twice to give the same results as h.init(), h.run()
+        pyNN.run(TSTOP)
 
     print "Writing spikes to file..."
     rate_RS, std_RS, rate_FS, std_FS = write_numspikes()
@@ -375,10 +375,10 @@ def run_sim():
 
 def make_Vpanel():                    # make panel
     h.xpanel("Brette-Gerstner network")
-    h.xbutton("Run simulation", "py.run_sim()")
+    h.xbutton("Run simulation", "py.run_sim(1)")
     h.xpanel()
-    
 
-make_Vpanel()
+#make_Vpanel()
+run_sim(with_graphs=False)
 
 

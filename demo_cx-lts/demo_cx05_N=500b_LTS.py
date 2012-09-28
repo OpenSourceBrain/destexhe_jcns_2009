@@ -232,15 +232,27 @@ def netConnect(): # local i, j, rand, distvert, nbconn
 #-----------------------------------------------------------------
 
 nstim = NSYN_STIM
+rStim = NumpyRNG(seed=SEED_GEN)
 stim = []
+
+def generate_stimulus(start, stop, interval):
+    rd = RandomDistribution('exponential', [interval], rng=rStim)
+    t = start
+    times = []
+    while t < stop:
+        t += rd.next()
+        if t < stop:
+            times.append(t)
+    return times
 
 def insertStimulation():
     print "Add stimulation of cortical neurons..."
-    spike_gen_parameters = {'start': TSTART, 'duration': STOPSTIM-TSTART,
-                            'rate': 1000.0/STIM_INTERVAL}
     for i in range(0, N_STIM):
-        G = pyNN.Population(nstim, pyNN.SpikeSourcePoisson, spike_gen_parameters)
+        G = pyNN.Population(nstim, pyNN.SpikeSourceArray)
         stim.append(G)
+        for cell in G:
+            spike_times = generate_stimulus(TSTART, STOPSTIM, STIM_INTERVAL)
+            cell.spike_times = spike_times
         ncs = pyNN.connect(G, neurons[i], weight=AMPA_GMAX*scale, delay=DT,
                            synapse_type='excitatory')
         stimsyn_list.append(ncs)

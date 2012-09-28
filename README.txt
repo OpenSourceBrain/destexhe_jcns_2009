@@ -1,7 +1,6 @@
-=============================================================
-Network simulations of self-sustained activity in networks of
-adaptive exponential integrate and fire neurons
-=============================================================
+=============================================================================================================
+Network simulations of self-sustained activity in networks of adaptive exponential integrate and fire neurons
+=============================================================================================================
 
 Demo files implemented using both NEURON and PyNN.
 

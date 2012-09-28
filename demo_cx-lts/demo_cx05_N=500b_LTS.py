@@ -27,13 +27,14 @@
  Replaced locally-defined AdExp cell class with BretteGerstnerIF from pyNN.neuron
  Replaced list of cells and list of spike sources by PyNN Populations
  Replaced direct NetCon creation with pyNN.connect()
+ Can now run with any PyNN-supported simulator.
 """
 
-from neuron import h, nrn, gui
+import sys
 from math import sqrt, pi
-import pyNN.neuron as pyNN
-
-h.load_file("nrngui.hoc")
+from pyNN.random import NumpyRNG, RandomDistribution
+SIMULATOR = sys.argv[-1]
+exec("import pyNN.%s as pyNN" % SIMULATOR)
     
 #-----------------------------------------------------------------
 #  Parameters
@@ -48,8 +49,7 @@ SEED_GEN = 983651
 DT = 0.1                                        # (ms) Time step
 TSTART  = 0                                     
 TSTOP   = 5000
-V_INIT  = -60
-h.celsius = 36
+V_INIT  = -60.0
 
 # Cell parameters
 
@@ -111,10 +111,16 @@ STOPSTIM        = 50            # duration of stimulation (ms)
 NSYN_STIM       = 20            # nb of stim (exc) synapses per neuron
 STIM_INTERVAL   = 70            # mean interval between stims (ms)
 
-MODEL_ID        = "cx05_LTS500b"
+MODEL_ID        = "cx05_LTS500b_%s" % SIMULATOR
+
+NEURONS_TO_RECORD = [170, 0, N_STIM-1]
+
+# NEURON-specific parameters
 
 NEURONS_TO_PLOT = [0, 10, 20, 30, N_E, N_E+10]
-NEURONS_TO_RECORD = [170, 0, N_STIM-1]
+USE_GUI = False   # } NEURON-specific 
+USE_CVODE = False # }
+
 
 #-----------------------------------------------------------------
 #  Create cells
@@ -127,7 +133,7 @@ NEURONS_TO_RECORD = [170, 0, N_STIM-1]
 #  Create Network
 #-----------------------------------------------------------------
 
-rLTS = h.Random(SEED_LTS)
+rLTS = NumpyRNG(seed=SEED_LTS)
 nLTS = 0
 
 def netCreate ():
@@ -135,7 +141,7 @@ def netCreate ():
     RS_parameters = {
         'cm': 1000*AREA*CAPACITANCE, 'tau_m': TAU, 'v_rest': V_REST,
         'v_thresh': VTR, 'tau_refrac': REFRACTORY+DT,
-        'v_reset': VBOT, 'v_spike': VTR, 'a': 1000.0*a_RS, 'b': b_RS,
+        'v_reset': VBOT, 'v_spike': VTR+1e-6, 'a': 1000.0*a_RS, 'b': b_RS,
         'tau_w': TAU_W, 'delta_T': DELTA, 'tau_syn_E': TAU_E, 'e_rev_E': V_E,
         'tau_syn_I': TAU_I, 'e_rev_I': V_I
     }
@@ -152,13 +158,9 @@ def netCreate ():
             print "Cell ", nbactual, " is LTS"
             neurons[nbactual].set_parameters(**LTS_parameters)
             nLTS = nLTS + 1
-        neurons[nbactual]._cell.adexp.spikewidth = DT
-        neurons[nbactual]._cell.adexp.vpeak = VTOP
 
     for nbactual in range(N_E, N_CX):     # create cortical cells (inhibitory)
         neurons[nbactual].set_parameters(**FS_parameters)
-        neurons[nbactual]._cell.adexp.spikewidth = DT
-        neurons[nbactual]._cell.adexp.vpeak = VTOP
     
     neurons.initialize('v', V_INIT)
     neurons.initialize('w', 0.0)
@@ -166,7 +168,7 @@ def netCreate ():
 
 #  Connect cells
 
-rCon = h.Random(SEED_CONN)
+rCon = NumpyRNG(seed=SEED_CONN)
 
 PRINT = 2        # flag to print; 0=minimal, 1=verbose, 2=summary
 
@@ -196,7 +198,7 @@ def netConnect(): # local i, j, rand, distvert, nbconn
             rand = rCon.uniform(0.0, 1.0)
             if (i != j) and (rand <= PROB_CONNECT):
                 nc = pyNN.connect(neurons[j], neurons[i], weight=AMPA_GMAX,
-                                  delay=DT, synapse_type="esyn")
+                                  delay=DT, synapse_type="excitatory")
                 ampa_list.append(nc)
                 nbconex = nbconex + 1    
             j = j + 1
@@ -211,7 +213,7 @@ def netConnect(): # local i, j, rand, distvert, nbconn
             rand = rCon.uniform(0.0, 1.0)
             if (i != j) and (rand <= PROB_CONNECT):
                 nc = pyNN.connect(neurons[j], neurons[i], weight=GABA_GMAX,
-                                  delay=DT, synapse_type="isyn")
+                                  delay=DT, synapse_type="inhibitory")
                 gabaa_list.append(nc)
                 nbconin = nbconin + 1
             j = j + 1
@@ -240,15 +242,14 @@ def insertStimulation():
         G = pyNN.Population(nstim, pyNN.SpikeSourcePoisson, spike_gen_parameters)
         stim.append(G)
         ncs = pyNN.connect(G, neurons[i], weight=AMPA_GMAX*scale, delay=DT,
-                           synapse_type='esyn')
+                           synapse_type='excitatory')
         stimsyn_list.append(ncs)
-    G[-1]._cell.seed(SEED_GEN)
 
 #-----------------------------------------------------------------
 # Simulation settings
 #-----------------------------------------------------------------
 
-pyNN.setup(DT, min_delay=DT)
+pyNN.setup(DT, min_delay=DT, use_cvode=USE_CVODE, rng_seeds_seed=SEED_GEN)
 
 #-----------------------------------------------------------------
 #  Add graphs
@@ -256,7 +257,6 @@ pyNN.setup(DT, min_delay=DT)
 
 g = [None]*20
 ngraph = 0
-h.steps_per_ms = 1.0/DT
 
 def addgraph(v_min, v_max, label, colour):
     global ngraph
@@ -303,13 +303,14 @@ nspikes = []
 
 def write_numspikes():  
     f = open("numspikes_%s.dat" % MODEL_ID, 'w')
-    f.write("%g %g\n" % (N_GEN, h.t))             # write nb of cells and time
+    f.write("%g %g\n" % (N_GEN, pyNN.get_current_time())) # write nb of cells and time
     sum1 = 0
     sum2 = 0
     sum3 = 0
     sum4 = 0
+    spike_counts = neurons.get_spike_counts()
     for i in range(0, N_GEN):
-        nspikes = neurons[i]._cell.spike_times.size()
+        nspikes = spike_counts.get(i, 0)
         f.write("%g\n" % nspikes)       # write tot number of spikes
         rate = nspikes * 1000.0 / TSTOP
         if i<N_E:
@@ -336,6 +337,7 @@ def create_graphs():
     h.py = h.PythonObject() # lets Hoc access Python
     h.nrnmainmenu()
     h.nrncontrolmenu()
+    h.steps_per_ms = 1.0/DT
 
     # adding graphs
     for id in NEURONS_TO_PLOT:
@@ -352,14 +354,14 @@ neurons[NEURONS_TO_RECORD].record_v()
 #-----------------------------------------------------------------
 
 def run_sim(with_graphs=False):
-    if with_graphs:
+    if with_graphs and SIMULATOR == 'neuron':
+        from neuron import h, gui
         create_graphs()
         h.v_init = V_INIT
         h.init()
         h.tstop = TSTOP
         h.run()
     else:
-        h.finitialize() # this is called by pyNN.run(), but needs to be called twice to give the same results as h.init(), h.run()
         pyNN.run(TSTOP)
 
     print "Writing spikes to file..."
@@ -378,7 +380,8 @@ def make_Vpanel():                    # make panel
     h.xbutton("Run simulation", "py.run_sim(1)")
     h.xpanel()
 
-#make_Vpanel()
-run_sim(with_graphs=False)
 
-
+if USE_GUI and SIMULATOR == 'neuron':
+    make_Vpanel()
+else:
+    run_sim(with_graphs=False)

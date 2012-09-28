@@ -8,9 +8,11 @@ excitatory neurons.  See details in the following article:
 Destexhe, A. Self-sustained asynchronous irregular states and
 Up/Down states in thalamic, cortical and thalamocortical networks
 of nonlinear integrate-and-fire neurons.  Journal of Computational
-Neuroscience (submitted).  
+Neuroscience 27: 493-506, 2009
 
 arXiv preprint: http://arxiv.org/abs/0809.0654
+
+The code in this directory reproduces Fig 7 of that paper.
 
 Implementation: the mechanism IF_BG4.mod implements the Adaptative
 Exponential IF model together with an IF model where the spike is
@@ -24,4 +26,12 @@ destexhe@unic.cnrs-gif.fr
 http://cns.iaf.cnrs-gif.fr
 
 
+Conversion to Python
+
+ - requires PyNN (http://neuralensemble.org/PyNN) and any PyNN-supported
+   simulator (e.g. NEURON, NEST, Brian)
+
+Andrew Davison
+davison@unic.cnrs-gif.fr
+http://andrewdavison.info
 

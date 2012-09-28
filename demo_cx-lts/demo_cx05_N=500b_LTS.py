@@ -28,6 +28,11 @@
  Replaced list of cells and list of spike sources by PyNN Populations
  Replaced direct NetCon creation with pyNN.connect()
  Can now run with any PyNN-supported simulator.
+ 
+Original Hoc version by Alain Destexhe
+Python version by Andrew Davison
+
+License: Modified BSD (see LICENSE.txt)
 """
 
 import sys

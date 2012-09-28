@@ -4,6 +4,7 @@ Script to plot data from demo_cx05_N=500b_LTS simulation.
 Usage: python plot.py <spike_times_file> <spike_counts_file> <vm_file> <neuron_index>
 
 Andrew Davison, 2012
+License: Modified BSD (see LICENSE.txt)
 """
 
 import sys

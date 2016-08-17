@@ -33,8 +33,12 @@ Original Hoc version by Alain Destexhe
 Python version by Andrew Davison
 
 License: Modified BSD (see LICENSE.txt)
+
+ Updated for PyNN 0.8, 2016
 """
 
+
+from __future__ import print_function
 import sys
 from math import sqrt, pi
 from pyNN.random import NumpyRNG, RandomDistribution
@@ -111,7 +115,7 @@ PROP = 0.05             # proportion of cortical LTS cells
 
 # Stimulation parameters
 
-N_STIM          = N_CX/5        # number of neurons stimulated
+N_STIM          = int(N_CX/5)   # number of neurons stimulated
 STOPSTIM        = 50            # duration of stimulation (ms)
 NSYN_STIM       = 20            # nb of stim (exc) synapses per neuron
 STIM_INTERVAL   = 70            # mean interval between stims (ms)
@@ -160,15 +164,14 @@ def netCreate ():
     for nbactual in range(0, N_E):      # create cortical cells (excitatory)
         # check if LTS cell
         if rLTS.uniform(0,1) < PROP:
-            print "Cell ", nbactual, " is LTS"
+            print("Cell", nbactual, "is LTS")
             neurons[nbactual].set_parameters(**LTS_parameters)
             nLTS = nLTS + 1
 
     for nbactual in range(N_E, N_CX):     # create cortical cells (inhibitory)
         neurons[nbactual].set_parameters(**FS_parameters)
     
-    neurons.initialize('v', V_INIT)
-    neurons.initialize('w', 0.0)
+    neurons.initialize(v=V_INIT, w=0.0)
 
 
 #  Connect cells
@@ -186,14 +189,14 @@ def netConnect(): # local i, j, rand, distvert, nbconn
     ni = 0
     ie = 0
     ii = 0
-    print "Calculate connectivity of cortical cells..."
+    print("Calculate connectivity of cortical cells...")
     # scan cortical cells
     for i in range(0, N_CX):
         if PRINT==1:
            if i<N_E:
-                print "Cortical EX cell ",i
+                print("Cortical EX cell ", i)
            else:
-                print "Cortical IN cell ",i
+                print("Cortical IN cell ", i)
         nbconex = 0
         nbconin = 0
 
@@ -203,12 +206,12 @@ def netConnect(): # local i, j, rand, distvert, nbconn
             rand = rCon.uniform(0.0, 1.0)
             if (i != j) and (rand <= PROB_CONNECT):
                 nc = pyNN.connect(neurons[j], neurons[i], weight=AMPA_GMAX,
-                                  delay=DT, synapse_type="excitatory")
+                                  delay=DT, receptor_type="excitatory")
                 ampa_list.append(nc)
                 nbconex = nbconex + 1    
             j = j + 1
         if PRINT==1:
-            print " - exc inputs from CX:", nbconex
+            print(" - exc inputs from CX:", nbconex)
         ne = ne + nbconex
         ie = ie + 1
 
@@ -218,19 +221,19 @@ def netConnect(): # local i, j, rand, distvert, nbconn
             rand = rCon.uniform(0.0, 1.0)
             if (i != j) and (rand <= PROB_CONNECT):
                 nc = pyNN.connect(neurons[j], neurons[i], weight=GABA_GMAX,
-                                  delay=DT, synapse_type="inhibitory")
+                                  delay=DT, receptor_type="inhibitory")
                 gabaa_list.append(nc)
                 nbconin = nbconin + 1
             j = j + 1
         if PRINT==1:
-            print " - inh inputs from CX:", nbconin
+            print(" - inh inputs from CX:", nbconin)
         ni= ni + nbconin
         ii = ii + 1
 
     if PRINT==2:
-        print "MEAN SYNAPSES PER NEURON:"
-        print "cortical excitatory inputs ", float(ne)/ie
-        print "cortical inhibitory inputs ", float(ni)/ii
+        print("MEAN SYNAPSES PER NEURON:")
+        print("cortical excitatory inputs ", float(ne)/ie)
+        print("cortical inhibitory inputs ", float(ni)/ii)
 
 #-----------------------------------------------------------------
 #  External Input
@@ -251,15 +254,15 @@ def generate_stimulus(start, stop, interval):
     return times
 
 def insertStimulation():
-    print "Add stimulation of cortical neurons..."
+    print("Add stimulation of cortical neurons...")
     for i in range(0, N_STIM):
-        G = pyNN.Population(nstim, pyNN.SpikeSourceArray)
+        G = pyNN.Population(nstim, pyNN.SpikeSourceArray())
         stim.append(G)
         for cell in G:
             spike_times = generate_stimulus(TSTART, STOPSTIM, STIM_INTERVAL)
             cell.spike_times = spike_times
         ncs = pyNN.connect(G, neurons[i], weight=AMPA_GMAX*scale, delay=DT,
-                           synapse_type='excitatory')
+                           receptor_type='excitatory')
         stimsyn_list.append(ncs)
 
 #-----------------------------------------------------------------
@@ -288,28 +291,28 @@ def addgraph(v_min, v_max, label, colour):
     h.graphList[0].append(g[ii])
    
 
-print ""
-print "======================================================================="
-print "            Network of ",N_GEN,"IF neurons in an active state"
-print "======================================================================="
-print ""
+print("")
+print("=======================================================================")
+print("            Network of ",N_GEN,"IF neurons in an active state")
+print("=======================================================================")
+print("")
 
 #------------------------------------------------------------------------------
 #  creating cells
 #------------------------------------------------------------------------------
-print "----[ CREATING CELLS ]----"
+print("----[ CREATING CELLS ]----")
 netCreate()
 
 #------------------------------------------------------------------------------
 #  creating network
 #------------------------------------------------------------------------------
-print "----[ CREATING NETWORK ]----"
+print("----[ CREATING NETWORK ]----")
 netConnect()
 
 #------------------------------------------------------------------------------
 #  adding network input
 #------------------------------------------------------------------------------
-print "----[ ADDING NETWORK INPUT ]----"
+print("----[ ADDING NETWORK INPUT ]----")
 insertStimulation()
 
 #------------------------------------------------------------------------------
@@ -361,10 +364,10 @@ def create_graphs():
         addgraph(-80, 40, "py.neurons[%d]._cell.seg.v" % id, 4)
 
 # record spikes
-neurons.record()
+neurons.record('spikes')
 
 # record the Vm         
-neurons[NEURONS_TO_RECORD].record_v()
+neurons[NEURONS_TO_RECORD].record('v')
 
 #-----------------------------------------------------------------
 # Procedure to run simulation and menu
@@ -381,15 +384,14 @@ def run_sim(with_graphs=False):
     else:
         pyNN.run(TSTOP)
 
-    print "Writing spikes to file..."
+    print("Writing spikes to file...")
     rate_RS, std_RS, rate_FS, std_FS = write_numspikes()
-    neurons.printSpikes("spiketimes_%s.dat" % MODEL_ID, compatible_output=False)
-    neurons.print_v("Vm_%s.dat" % MODEL_ID, compatible_output=False)
+    neurons.write_data("data_%s.pkl" % MODEL_ID)
 
-    print "Mean rate per RS cell (Hz) = ", rate_RS
-    print " standard deviation = ", std_RS
-    print "Mean rate per FS cell (Hz) = ", rate_FS
-    print " standard deviation = ", std_FS
+    print("Mean rate per RS cell (Hz) = ", rate_RS)
+    print(" standard deviation = ", std_RS)
+    print("Mean rate per FS cell (Hz) = ", rate_FS)
+    print(" standard deviation = ", std_FS)
 
 
 def make_Vpanel():                    # make panel

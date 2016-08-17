@@ -1,16 +1,19 @@
 """
 Script to plot data from demo_cx05_N=500b_LTS simulation.
 
-Usage: python plot.py <spike_times_file> <spike_counts_file> <vm_file> <neuron_index>
+Usage: python plot.py <spikes_and_vm_file> <spike_counts_file> <neuron_index>
 
 Andrew Davison, 2012
 License: Modified BSD (see LICENSE.txt)
+
+Updated for PyNN 0.8, 2016
 """
 
 import sys
 import numpy
 import matplotlib
 import matplotlib.pyplot as plt
+from neo.io import get_io
 
 TSTOP = 5000 # ms
 matplotlib.rcParams.update({
@@ -19,27 +22,29 @@ matplotlib.rcParams.update({
     'ytick.direction': 'out',})
 
 def get_version():
-    from mercurial import ui, hg
-    from binascii import hexlify
-    repo = hg.repository(ui.ui(), "..")
-    ctx = repo.parents()[0]
-    return hexlify(ctx.node()[:6])
+    try:
+        from mercurial import ui, hg
+        from binascii import hexlify
+        repo = hg.repository(ui.ui(), "..")
+        ctx = repo.parents()[0]
+        return hexlify(ctx.node()[:6])
+    except ImportError:
+        return "unknown"
 __version__ = get_version()
 
 
-spike_times_file, spike_counts_file, vm_file, neuron_id = sys.argv[1:]
+spikes_and_vm_file, spike_counts_file, neuron_id = sys.argv[1:]
 
 fig = plt.figure(figsize=(8, 3))
 fig.dpi = 120
 
 # Plot spike times
-with open(spike_times_file) as fp:
-    data = numpy.loadtxt(fp)
-ids, times = data.T
+data = get_io(spikes_and_vm_file).read()[0].segments[0]
 
 ax = fig.add_axes((0.1, 0.12, 0.6, 0.55), frameon=False)
 ax.set_xlim([0, TSTOP])
-ax.plot(times, ids, 'b.', markersize=0.2)
+for i, spiketrain in enumerate(data.spiketrains):
+    ax.plot(spiketrain.times, i*numpy.ones_like(spiketrain), 'b.', markersize=0.2)
 ax.yaxis.set_ticks_position('left')
 ax.xaxis.set_ticks_position('bottom')
 ax.set_xlabel("Time (ms)")
@@ -64,12 +69,11 @@ ax.set_xlabel("Firing rate (Hz)")
 ax.set_ylabel("Number of cells")
 
 # Plot sample membrane potential trace
-data = numpy.loadtxt(vm_file)
-id, t, v = data[data[:, 0] == int(neuron_id)].T
+v = data.analogsignalarrays[0]
 
 ax = fig.add_axes((0.1, 0.73, 0.6, 0.25), frameon=False)
 ax.set_xlim([0, TSTOP])
-ax.plot(t, v, 'r', linewidth=0.8)
+ax.plot(v.times, v[:, 0], 'r', linewidth=0.8)
 ax.xaxis.set_visible(False)
 ax.yaxis.set_ticks_position('left')
 ax.set_xlabel("Time (ms)")
